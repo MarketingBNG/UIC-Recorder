@@ -29,6 +29,8 @@ const schema = z.object({
   JWT_SECRET: z.string().min(32),
   SESSION_SECRET: z.string().min(32),
   WORKER_TOKEN: z.string().min(32),
+  // Optional: enables /internal/import/* for bulk-importing already-copied recordings.
+  IMPORT_TOKEN: z.string().min(32).optional().or(z.literal("").transform(() => undefined)),
 
   DEFAULT_PHONE_REGION: z.string().length(2).default("IN"),
 });

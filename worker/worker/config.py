@@ -23,7 +23,7 @@ class Settings:
     worker_id: str
     provider: str
     language: str | None
-    batch_size: int
+    concurrency: int
     idle_max_sleep: float
     # Provider-specific
     whisper_model: str
@@ -44,7 +44,8 @@ class Settings:
             worker_id=e.get("WORKER_ID") or f"{socket.gethostname()}-{os.getpid()}",
             provider=e.get("TRANSCRIBE_PROVIDER", "stub"),
             language=e.get("TRANSCRIBE_LANGUAGE") or None,
-            batch_size=int(e.get("WORKER_BATCH_SIZE", "1")),
+            # Jobs transcribed in parallel by this worker process.
+            concurrency=max(1, int(e.get("WORKER_CONCURRENCY", "4"))),
             idle_max_sleep=float(e.get("WORKER_IDLE_MAX_SLEEP", "30")),
             whisper_model=e.get("WHISPER_MODEL", "large-v3-turbo"),
             whisper_device=e.get("WHISPER_DEVICE", "auto"),

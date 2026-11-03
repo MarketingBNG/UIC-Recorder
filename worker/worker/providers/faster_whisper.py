@@ -16,6 +16,8 @@ class FasterWhisperProvider:
             settings.whisper_model,
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
+            # One shared model; lets WORKER_CONCURRENCY jobs decode at the same time.
+            num_workers=settings.concurrency,
         )
         self.model_name = settings.whisper_model
 

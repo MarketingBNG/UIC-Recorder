@@ -16,7 +16,10 @@ const pg = new EmbeddedPostgres({
   password: "uic-dev-password",
   persistent: true,
   onLog: () => {},
+  onError: (e) => console.error(String(e)),
 });
+// If start fails with "pre-existing shared memory block is still in use", an old
+// postgres.exe from this folder is still running (e.g. after a force-kill); stop it.
 
 if (fresh) await pg.initialise();
 await pg.start();

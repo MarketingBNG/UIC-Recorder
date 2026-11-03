@@ -41,3 +41,18 @@ The worker only talks to the API over HTTPS. It needs no access to the database 
 
 ## Auto-deploy
 Connect the GitHub app in Coolify. Pushing to `main` then redeploys `uic-api` and `uic-worker`.
+
+## Importing recordings you already copied
+1. On `uic-api`, set `IMPORT_TOKEN` (`openssl rand -base64 48`) and redeploy.
+2. On the computer that holds the copied folders (with Node 24 installed):
+   ```
+   cd server && npm ci
+   set API_URL=https://calls.<yourdomain>
+   set IMPORT_TOKEN=<same value>
+   npx tsx scripts/import-existing.ts --root "D:\Recordings" --domain usaindiacfo.com --concurrency 8
+   ```
+   Each sub-folder of `D:\Recordings` is one person, named `ravi` or `ravi@usaindiacfo.com`. For a single person, use `--email ravi@usaindiacfo.com --dir "D:\Recordings\Ravi"` instead.
+3. Add `--dry-run` first to preview the phone, name and date read from each filename.
+4. It's safe to stop and re-run. Files already on the server are skipped, and failures are listed in `import-failures-<date>.log`.
+5. Imported calls queue behind live calls. To finish faster, raise `WORKER_CONCURRENCY` on `uic-worker`, or run extra workers (for example on a rented GPU, see above). They all share one queue.
+6. Remove `IMPORT_TOKEN` from `uic-api` when the import is finished.

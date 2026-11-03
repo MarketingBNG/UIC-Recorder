@@ -2,6 +2,7 @@ import signal
 import tempfile
 import threading
 import time
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from pathlib import Path
 
 import httpx
@@ -131,30 +132,45 @@ def run(settings: Settings) -> None:
     def stop(*_: object) -> None:
         nonlocal stopping
         stopping = True
-        log.info("stopping after current job")
+        log.info("stopping after running jobs finish")
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
-    log.info("worker started", worker_id=settings.worker_id, provider=provider.name, api=settings.api_url)
+    log.info("worker started", worker_id=settings.worker_id, provider=provider.name, api=settings.api_url,
+             concurrency=settings.concurrency)
 
+    # Up to `concurrency` jobs run at once; we only claim as many as we have free slots,
+    # so other workers can take the rest of the queue.
+    running: set[Future] = set()
     idle = 1.0
-    while not stopping:
-        try:
-            jobs = api.claim(settings.batch_size)
-        except Exception:
-            log.exception("claim failed")
-            jobs = []
-        if not jobs:
-            time.sleep(idle)
-            idle = min(idle * 2, settings.idle_max_sleep)
-            continue
-        idle = 1.0
-        for job in jobs:
-            try:
-                process_job(api, provider, job, settings.language)
-            except Exception:
-                # e.g. result POST failed after retries; the API reclaims the job later.
-                log.exception("could not finish job", job_id=job.get("jobId"))
+    with ThreadPoolExecutor(max_workers=settings.concurrency, thread_name_prefix="job") as pool:
+        while not stopping or running:
+            free = settings.concurrency - len(running)
+            jobs: list[dict] = []
+            if free > 0 and not stopping:
+                try:
+                    jobs = api.claim(free)
+                except Exception:
+                    log.exception("claim failed")
+            for job in jobs:
+                running.add(pool.submit(_safe_process, api, provider, job, settings.language))
+            if jobs:
+                idle = 1.0
+            if running:
+                # Wake when any job finishes (or periodically to top up free slots).
+                done, _ = wait(running, timeout=idle if not jobs else 0.5, return_when=FIRST_COMPLETED)
+                running -= done
+            elif not jobs:
+                time.sleep(idle)
+                idle = min(idle * 2, settings.idle_max_sleep)
+
+
+def _safe_process(api: Api, provider: Provider, job: dict, language: str | None) -> None:
+    try:
+        process_job(api, provider, job, language)
+    except Exception:
+        # e.g. result POST failed after retries; the API reclaims the job later.
+        log.exception("could not finish job", job_id=job.get("jobId"))
 
 
 def main() -> None:

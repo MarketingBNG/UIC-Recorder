@@ -12,6 +12,7 @@ import { authRoutes } from "./routes/auth.js";
 import { callRoutes } from "./routes/calls.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { deviceRoutes } from "./routes/device.js";
+import { importRoutes } from "./routes/import.js";
 import { internalRoutes } from "./routes/internal.js";
 
 export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
@@ -58,6 +59,7 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => deviceRoutes(s, deps));
   await app.register(async (s) => callRoutes(s, deps));
   await app.register(async (s) => internalRoutes(s, deps));
+  await app.register(async (s) => importRoutes(s, deps));
   await app.register(async (s) => dashboardRoutes(s, deps));
 
   // Built dashboard (React SPA), served from the same origin.
