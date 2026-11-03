@@ -1,0 +1,212 @@
+// UIC Recorder database schema.
+// Postgres features Prisma can't express (pg_trgm extension, the generated
+// tsvector column and its GIN index) live in hand-edited migration SQL.
+// When creating new migrations, check the generated SQL does not drop them.
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  AGENT
+}
+
+enum CallDirection {
+  INCOMING
+  OUTGOING
+  MISSED
+  UNKNOWN
+}
+
+enum CallSource {
+  LIVE
+  BACKLOG
+  IMPORT
+}
+
+enum CallStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  TRANSCRIBING
+  TRANSCRIBED
+  FAILED
+}
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+enum AuditAction {
+  PLAY
+  DOWNLOAD
+  SEARCH
+  DELETE
+  USER_CHANGE
+  DEVICE_REVOKE
+}
+
+model User {
+  id              String    @id @default(uuid(7)) @db.Uuid
+  email           String    @unique
+  googleSub       String?   @unique @map("google_sub")
+  name            String?
+  pictureUrl      String?   @map("picture_url")
+  role            Role      @default(AGENT)
+  team            String?
+  active          Boolean   @default(true)
+  excludedNumbers String[]  @default([]) @map("excluded_numbers")
+  lastLoginAt     DateTime? @map("last_login_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  devices  Device[]
+  calls    Call[]
+  auditLog AuditLog[]
+
+  @@map("users")
+}
+
+model Device {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  installId      String    @map("install_id")
+  model          String?
+  androidVersion String?   @map("android_version")
+  appVersion     String?   @map("app_version")
+  lastSeenAt     DateTime? @map("last_seen_at")
+  lastSyncAt     DateTime? @map("last_sync_at")
+  pendingCount   Int       @default(0) @map("pending_count")
+  permissionsOk  Boolean   @default(false) @map("permissions_ok")
+  freeBytes      BigInt?   @map("free_bytes")
+  revokedAt      DateTime? @map("revoked_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+  calls         Call[]
+
+  @@unique([userId, installId])
+  @@map("devices")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid(7)) @db.Uuid
+  deviceId   String    @map("device_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  replacedBy String?   @map("replaced_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([deviceId])
+  @@map("refresh_tokens")
+}
+
+model Call {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  userId         String        @map("user_id") @db.Uuid
+  deviceId       String?       @map("device_id") @db.Uuid
+  phoneE164      String?       @map("phone_e164")
+  phoneRaw       String?       @map("phone_raw")
+  contactName    String?       @map("contact_name")
+  direction      CallDirection @default(UNKNOWN)
+  source         CallSource    @default(LIVE)
+  startedAt      DateTime      @map("started_at")
+  durationS      Int?          @map("duration_s")
+  originalName   String?       @map("original_name")
+  originalSha256 String        @map("original_sha256")
+  uploadSha256   String?       @map("upload_sha256")
+  mimeType       String?       @map("mime_type")
+  filePath       String?       @map("file_path")
+  fileSize       BigInt?       @map("file_size")
+  status         CallStatus    @default(PENDING_UPLOAD)
+  uploadedAt     DateTime?     @map("uploaded_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  device     Device?     @relation(fields: [deviceId], references: [id], onDelete: SetNull)
+  transcript Transcript?
+  jobs       Job[]
+
+  @@unique([userId, originalSha256])
+  @@index([userId, startedAt(sort: Desc)])
+  @@index([startedAt(sort: Desc)])
+  @@index([phoneE164(ops: raw("gin_trgm_ops"))], type: Gin, map: "calls_phone_e164_trgm_idx")
+  @@map("calls")
+}
+
+model Transcript {
+  callId    String                   @id @map("call_id") @db.Uuid
+  text      String
+  language  String?
+  provider  String
+  segments  Json?
+  // Generated column: to_tsvector('simple', text). Created in migration SQL.
+  tsv       Unsupported("tsvector")?
+  createdAt DateTime                 @default(now()) @map("created_at")
+  updatedAt DateTime                 @updatedAt @map("updated_at")
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@map("transcripts")
+}
+
+model Job {
+  id        String    @id @default(uuid(7)) @db.Uuid
+  callId    String    @map("call_id") @db.Uuid
+  kind      String    @default("transcribe")
+  priority  Int       @default(0)
+  status    JobStatus @default(QUEUED)
+  attempts  Int       @default(0)
+  lastError String?   @map("last_error")
+  runAfter  DateTime  @default(now()) @map("run_after")
+  lockedAt  DateTime? @map("locked_at")
+  lockedBy  String?   @map("locked_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([status, priority(sort: Desc), createdAt])
+  @@map("jobs")
+}
+
+model AuditLog {
+  id        String      @id @default(uuid(7)) @db.Uuid
+  userId    String?     @map("user_id") @db.Uuid
+  action    AuditAction
+  callId    String?     @map("call_id") @db.Uuid
+  detail    Json?
+  ip        String?
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+  @@map("audit_log")
+}
+
+// Single-row table (id = 1) holding settings admins can change without a deploy.
+model Setting {
+  id           Int      @id @default(1)
+  deviceConfig Json     @map("device_config")
+  latestApp    Json?    @map("latest_app")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}

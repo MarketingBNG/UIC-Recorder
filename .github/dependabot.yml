@@ -1,0 +1,11 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /server
+    schedule: { interval: weekly }
+  - package-ecosystem: uv
+    directory: /worker
+    schedule: { interval: weekly }
+  - package-ecosystem: gradle
+    directory: /android
+    schedule: { interval: weekly }
