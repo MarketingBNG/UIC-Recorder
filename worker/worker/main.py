@@ -8,7 +8,7 @@ import httpx
 import structlog
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
-from .config import Settings
+from .config import Settings, load_dotenv
 from .providers import PermanentError, Provider, load_provider
 
 log = structlog.get_logger()
@@ -164,4 +164,5 @@ def main() -> None:
         structlog.processors.format_exc_info,
         structlog.processors.JSONRenderer(),
     ])
+    load_dotenv()
     run(Settings.from_env())
