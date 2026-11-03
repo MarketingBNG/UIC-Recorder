@@ -11,9 +11,11 @@ export interface ClaimedJob {
 
 /**
  * Atomically claims up to `limit` runnable jobs (highest priority, oldest first).
- * Jobs whose worker died (lock older than STALE_LOCK_MINUTES) are reclaimed.
+ * Jobs whose worker died (no heartbeat for STALE_LOCK_MINUTES) are reclaimed,
+ * unless they've used up their attempts, in which case they're failed.
  */
 export async function claimJobs(db: Db, workerId: string, limit: number): Promise<ClaimedJob[]> {
+  await failExhaustedStaleJobs(db);
   return db.$queryRaw<ClaimedJob[]>`
     UPDATE "jobs" SET
       "status" = 'RUNNING',
@@ -24,12 +26,36 @@ export async function claimJobs(db: Db, workerId: string, limit: number): Promis
     WHERE "id" IN (
       SELECT "id" FROM "jobs"
       WHERE ("status" = 'QUEUED' AND "run_after" <= now())
-         OR ("status" = 'RUNNING' AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES}))
+         OR ("status" = 'RUNNING' AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES})
+             AND "attempts" < ${MAX_ATTEMPTS})
       ORDER BY "priority" DESC, "created_at" ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
     )
     RETURNING "id", "call_id" AS "callId", "attempts"`;
+}
+
+/** Stale jobs that already hit MAX_ATTEMPTS (e.g. a file that crashes the worker) stop here. */
+async function failExhaustedStaleJobs(db: Db): Promise<void> {
+  await db.$executeRaw`
+    WITH dead AS (
+      UPDATE "jobs" SET "status" = 'FAILED', "locked_at" = NULL, "locked_by" = NULL,
+        "last_error" = coalesce("last_error", 'worker stopped responding'), "updated_at" = now()
+      WHERE "status" = 'RUNNING'
+        AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES})
+        AND "attempts" >= ${MAX_ATTEMPTS}
+      RETURNING "call_id"
+    )
+    UPDATE "calls" SET "status" = 'FAILED', "updated_at" = now() WHERE "id" IN (SELECT "call_id" FROM dead)`;
+}
+
+/** Keeps a long-running job's lock fresh. Returns false if the lock was lost. */
+export async function heartbeatJob(db: Db, jobId: string, workerId: string): Promise<boolean> {
+  const { count } = await db.job.updateMany({
+    where: { id: jobId, status: "RUNNING", lockedBy: workerId },
+    data: { lockedAt: new Date() },
+  });
+  return count === 1;
 }
 
 export interface TranscriptResult {

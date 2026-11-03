@@ -1,11 +1,12 @@
 import signal
 import tempfile
+import threading
 import time
 from pathlib import Path
 
 import httpx
 import structlog
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .config import Settings
 from .providers import PermanentError, Provider, load_provider
@@ -16,8 +17,18 @@ _EXT = {"audio/mp4": ".m4a", "audio/mpeg": ".mp3", "audio/aac": ".aac", "audio/a
         "audio/3gpp": ".3gp", "audio/ogg": ".ogg", "audio/opus": ".opus", "audio/wav": ".wav",
         "audio/webm": ".webm"}
 
+HEARTBEAT_SECONDS = 60
+
+
+def _is_transient(e: BaseException) -> bool:
+    """Network failures and 5xx/429 are worth retrying; other 4xx never succeed."""
+    if isinstance(e, httpx.TransportError):
+        return True
+    return isinstance(e, httpx.HTTPStatusError) and (e.response.status_code >= 500 or e.response.status_code == 429)
+
+
 _network_retry = retry(
-    retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
+    retry=retry_if_exception(_is_transient),
     wait=wait_exponential(multiplier=1, max=60),
     stop=stop_after_attempt(8),
     reraise=True,
@@ -50,6 +61,14 @@ class Api:
                 for chunk in res.iter_bytes(1 << 16):
                     f.write(chunk)
 
+    def heartbeat(self, job_id: str) -> bool:
+        """Refreshes our lock; False means another worker took the job over."""
+        try:
+            res = self.http.post(f"/internal/jobs/{job_id}/heartbeat", json={"workerId": self.worker_id})
+            return res.status_code != 409
+        except httpx.HTTPError:
+            return True  # transient; try again next beat
+
     @_network_retry
     def post_result(self, job_id: str, payload: dict) -> None:
         res = self.http.post(f"/internal/jobs/{job_id}/result", json={"workerId": self.worker_id, **payload})
@@ -59,10 +78,31 @@ class Api:
         res.raise_for_status()
 
 
+class _Heartbeat:
+    """Keeps the job lock alive while a long transcription runs."""
+
+    def __init__(self, api: Api, job_id: str) -> None:
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, args=(api, job_id), daemon=True)
+
+    def _run(self, api: Api, job_id: str) -> None:
+        while not self._stop.wait(HEARTBEAT_SECONDS):
+            if not api.heartbeat(job_id):
+                log.warning("lost job lock during transcription", job_id=job_id)
+                return
+
+    def __enter__(self) -> "_Heartbeat":
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self._stop.set()
+
+
 def process_job(api: Api, provider: Provider, job: dict, language: str | None) -> None:
     job_id = job["jobId"]
     started = time.monotonic()
-    with tempfile.TemporaryDirectory(prefix="uic-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="uic-") as tmp, _Heartbeat(api, job_id):
         audio = Path(tmp) / f"audio{_EXT.get(job.get('mimeType') or '', '.bin')}"
         try:
             api.download(job["audioPath"], audio)
@@ -110,7 +150,11 @@ def run(settings: Settings) -> None:
             continue
         idle = 1.0
         for job in jobs:
-            process_job(api, provider, job, settings.language)
+            try:
+                process_job(api, provider, job, settings.language)
+            except Exception:
+                # e.g. result POST failed after retries; the API reclaims the job later.
+                log.exception("could not finish job", job_id=job.get("jobId"))
 
 
 def main() -> None:

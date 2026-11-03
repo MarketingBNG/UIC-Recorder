@@ -45,3 +45,27 @@ def test_provider_error_is_reported_as_retryable():
     process_job(api, Boom(), {"jobId": "j1", "callId": "c1", "audioPath": "/internal/audio/c1"}, None)
     body = result.calls.last.request.read().replace(b" ", b"")
     assert b'"ok":false' in body and b'"retryable":true' in body and b"providerdown" in body
+
+
+def test_only_transient_errors_are_retried():
+    from worker.main import _is_transient
+
+    req = httpx.Request("POST", "http://x")
+    assert _is_transient(httpx.ConnectError("down"))
+    assert _is_transient(httpx.HTTPStatusError("", request=req, response=httpx.Response(503, request=req)))
+    assert not _is_transient(httpx.HTTPStatusError("", request=req, response=httpx.Response(404, request=req)))
+    assert not _is_transient(httpx.HTTPStatusError("", request=req, response=httpx.Response(413, request=req)))
+
+
+@respx.mock
+def test_run_loop_survives_a_failed_result_post(monkeypatch):
+    import worker.main as m
+
+    api = Api(Settings.from_env(ENV))
+    respx.get("http://api.test/internal/audio/c1").mock(return_value=httpx.Response(200, content=b"x"))
+    respx.post("http://api.test/internal/jobs/j1/result").mock(return_value=httpx.Response(400))
+    try:
+        process_job(api, StubProvider(), {"jobId": "j1", "callId": "c1", "audioPath": "/internal/audio/c1"}, None)
+    except httpx.HTTPStatusError:
+        pass  # surfaces immediately (no 5-minute retry); run() catches it per job
+    assert respx.calls.call_count == 2

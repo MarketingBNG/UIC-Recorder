@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { callScope, requireSession } from "../auth/guards.js";
 import { HttpError, currentUser, type Deps } from "../context.js";
-import type { AuditAction, Prisma } from "../generated/prisma/client.js";
+import { Prisma, type AuditAction, type User } from "../generated/prisma/client.js";
 import { DeviceConfig, getSettings } from "../settings.js";
 
 const ListQuery = z.object({
@@ -33,16 +33,43 @@ const UserPatch = z.object({
 
 const idParam = (req: FastifyRequest) => z.uuid().parse((req.params as { id: string }).id);
 
+const SEARCH_LIMIT = 1000;
+
+/**
+ * Transcript full-text search with role scope and filters applied in SQL, so the
+ * LIMIT only counts calls this user may see. Mirrors callScope() in guards.ts.
+ */
+function searchCallIds(db: Deps["db"], user: User, q: z.infer<typeof ListQuery> & { q: string }) {
+  const where: Prisma.Sql[] = [Prisma.sql`t."tsv" @@ websearch_to_tsquery('simple', ${q.q})`];
+  if (user.role === "MANAGER" && user.team) where.push(Prisma.sql`u."team" = ${user.team}`);
+  else if (user.role !== "ADMIN") where.push(Prisma.sql`c."user_id" = ${user.id}::uuid`);
+  if (q.userId) where.push(Prisma.sql`c."user_id" = ${q.userId}::uuid`);
+  if (q.direction) where.push(Prisma.sql`c."direction"::text = ${q.direction}`);
+  if (q.status) where.push(Prisma.sql`c."status"::text = ${q.status}`);
+  if (q.from) where.push(Prisma.sql`c."started_at" >= ${new Date(q.from)}`);
+  if (q.to) where.push(Prisma.sql`c."started_at" <= ${new Date(q.to)}`);
+  return db.$queryRaw<{ id: string }[]>`
+    SELECT c."id" FROM "transcripts" t
+    JOIN "calls" c ON c."id" = t."call_id"
+    JOIN "users" u ON u."id" = c."user_id"
+    WHERE ${Prisma.join(where, " AND ")}
+    ORDER BY c."started_at" DESC
+    LIMIT ${SEARCH_LIMIT}`;
+}
+
 /** JSON for the web dashboard (session cookie). */
 export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   const anyone = { preHandler: requireSession(deps) };
   const managers = { preHandler: requireSession(deps, ["ADMIN", "MANAGER"]) };
   const admins = { preHandler: requireSession(deps, ["ADMIN"]) };
 
+  /** Fire-and-forget audit write; failures are logged, never crash the request. */
   const audit = (req: FastifyRequest, action: AuditAction, callId?: string, detail?: object) =>
-    deps.db.auditLog.create({
-      data: { userId: req.user?.id ?? null, action, callId: callId ?? null, detail: detail ?? undefined, ip: req.ip },
-    });
+    deps.db.auditLog
+      .create({
+        data: { userId: req.user?.id ?? null, action, callId: callId ?? null, detail: detail ?? undefined, ip: req.ip },
+      })
+      .catch((err: unknown) => req.log.error({ err, action }, "audit write failed"));
 
   app.get("/api/me", anyone, async (req) => {
     const u = currentUser(req);
@@ -61,14 +88,9 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       and.push({ startedAt: { gte: q.from ? new Date(q.from) : undefined, lte: q.to ? new Date(q.to) : undefined } });
     }
     if (q.q) {
-      // Full-text match on transcripts (parameterised; 'simple' config suits Hinglish).
-      const hits = await deps.db.$queryRaw<{ call_id: string }[]>`
-        SELECT "call_id" FROM "transcripts"
-        WHERE "tsv" @@ websearch_to_tsquery('simple', ${q.q})
-        ORDER BY ts_rank("tsv", websearch_to_tsquery('simple', ${q.q})) DESC
-        LIMIT 1000`;
-      and.push({ id: { in: hits.map((h) => h.call_id) } });
-      void audit(req, "SEARCH", undefined, { q: q.q });
+      const hits = await searchCallIds(deps.db, currentUser(req), { ...q, q: q.q });
+      and.push({ id: { in: hits.map((h) => h.id) } });
+      audit(req, "SEARCH", undefined, { q: q.q });
     }
     const rows = await deps.db.call.findMany({
       where,
@@ -124,10 +146,12 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       start = Math.max(0, start);
       end = Math.min(end, size - 1);
       if (start > end) return reply.code(416).header("content-range", `bytes */${size}`).send();
+      // Browsers start playback with "bytes=0-"; seeks use later offsets.
+      if (start === 0) audit(req, "PLAY", call.id);
       reply.code(206).header("content-range", `bytes ${start}-${end}/${size}`).header("content-length", end - start + 1);
       return reply.send(deps.storage.read(call.filePath, { start, end }));
     }
-    void audit(req, "PLAY", call.id);
+    audit(req, "PLAY", call.id);
     reply.header("content-length", size);
     return reply.send(deps.storage.read(call.filePath));
   });

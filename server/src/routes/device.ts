@@ -48,7 +48,8 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
   app.get("/v1/app/download", auth, async (_req, reply) => {
     const { latestApp } = await getSettings(deps.db);
     if (!latestApp) throw new HttpError(404, "No app published");
-    const file = path.join(deps.storage.root, "..", "apk", latestApp.fileName);
+    // Inside the mounted storage dir so it survives redeploys.
+    const file = path.join(deps.storage.root, "apk", latestApp.fileName);
     reply.header("content-type", "application/vnd.android.package-archive");
     reply.header("content-disposition", `attachment; filename="${latestApp.fileName}"`);
     return reply.send(createReadStream(file));

@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
-import { claimJobs, completeJob, failJob } from "../jobs/queue.js";
+import { claimJobs, completeJob, failJob, heartbeatJob } from "../jobs/queue.js";
 
 const Claim = z.object({ workerId: z.string().min(1).max(100), limit: z.number().int().min(1).max(20).default(1) });
 
@@ -58,7 +58,16 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     return reply.send(deps.storage.read(call.filePath));
   });
 
-  app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/result", auth, async (req, reply) => {
+  app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/heartbeat", auth, async (req, reply) => {
+    const jobId = z.uuid().parse(req.params.jobId);
+    const { workerId } = z.object({ workerId: z.string().max(100) }).parse(req.body);
+    if (!(await heartbeatJob(deps.db, jobId, workerId))) throw new HttpError(409, "Job is not locked by this worker");
+    return reply.code(204).send();
+  });
+
+  // Long calls produce large transcripts + segment lists.
+  const resultOpts = { ...auth, bodyLimit: 20 * 1024 * 1024 };
+  app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/result", resultOpts, async (req, reply) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const body = Result.parse(req.body);
     const ok = body.ok

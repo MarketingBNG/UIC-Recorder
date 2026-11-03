@@ -190,3 +190,71 @@ describe("worker jobs + search", () => {
     expect(res.statusCode).toBe(401);
   });
 });
+
+describe("regressions", () => {
+  it("stops reclaiming stale jobs after MAX_ATTEMPTS and fails them", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    const { callId } = await uploadCall(s.headers, randomBytes(32));
+    const job = await t.db.job.findFirstOrThrow({ where: { callId } });
+    await t.db.job.update({
+      where: { id: job.id },
+      data: { status: "RUNNING", lockedBy: "dead", lockedAt: new Date(Date.now() - 3600_000), attempts: 5, priority: 2000 },
+    });
+    const claimed = await t.app.inject({ method: "POST", url: "/internal/jobs/claim", headers: t.workerHeaders, payload: { workerId: "w5", limit: 20 } });
+    expect(claimed.json().jobs.map((j: { jobId: string }) => j.jobId)).not.toContain(job.id);
+    expect((await t.db.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("FAILED");
+    expect((await t.db.call.findUniqueOrThrow({ where: { id: callId } })).status).toBe("FAILED");
+  });
+
+  it("heartbeat keeps a long job from being reclaimed", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    const { callId } = await uploadCall(s.headers, randomBytes(32));
+    const job = await t.db.job.findFirstOrThrow({ where: { callId } });
+    await t.db.job.update({
+      where: { id: job.id },
+      data: { status: "RUNNING", lockedBy: "slow", lockedAt: new Date(Date.now() - 3600_000), attempts: 1, priority: 3000 },
+    });
+    const hb = await t.app.inject({ method: "POST", url: `/internal/jobs/${job.id}/heartbeat`, headers: t.workerHeaders, payload: { workerId: "slow" } });
+    expect(hb.statusCode).toBe(204);
+    const claimed = await t.app.inject({ method: "POST", url: "/internal/jobs/claim", headers: t.workerHeaders, payload: { workerId: "thief", limit: 20 } });
+    expect(claimed.json().jobs.map((j: { jobId: string }) => j.jobId)).not.toContain(job.id);
+    const wrong = await t.app.inject({ method: "POST", url: `/internal/jobs/${job.id}/heartbeat`, headers: t.workerHeaders, payload: { workerId: "thief" } });
+    expect(wrong.statusCode).toBe(409);
+  });
+
+  it("search finds an agent's call even when other users have >1000 matches", async () => {
+    const noisy = await t.db.user.create({ data: { email: uniqueEmail("noisy") } });
+    const rows = Array.from({ length: 1100 }, (_, i) => ({
+      userId: noisy.id,
+      originalSha256: sha256(`noisy-${noisy.id}-${i}`),
+      startedAt: new Date(Date.now() - i * 1000),
+      status: "TRANSCRIBED" as const,
+    }));
+    await t.db.call.createMany({ data: rows });
+    const ids = await t.db.call.findMany({ where: { userId: noisy.id }, select: { id: true } });
+    await t.db.transcript.createMany({ data: ids.map((c) => ({ callId: c.id, text: "zebra quarterly invoice", provider: "stub" })) });
+
+    const agentEmail = uniqueEmail("quiet");
+    const agent = await t.db.user.create({ data: { email: agentEmail } });
+    const mine = await t.db.call.create({
+      data: { userId: agent.id, originalSha256: sha256(`mine-${agent.id}`), startedAt: new Date("2020-01-01"), status: "TRANSCRIBED" },
+    });
+    await t.db.transcript.create({ data: { callId: mine.id, text: "zebra quarterly invoice from me", provider: "stub" } });
+
+    const sess = await t.sessionFor(agentEmail);
+    const res = await t.app.inject({ method: "GET", url: "/api/calls?q=zebra", headers: { cookie: sess.cookie } });
+    expect(res.json().items.map((c: { id: string }) => c.id)).toEqual([mine.id]);
+  });
+
+  it("logs PLAY for browser range requests starting at 0", async () => {
+    const email = uniqueEmail("player");
+    const s = await t.loginDevice(email);
+    const { callId } = await uploadCall(s.headers, randomBytes(500));
+    const sess = await t.sessionFor(email);
+    const res = await t.app.inject({ method: "GET", url: `/api/calls/${callId}/audio`, headers: { cookie: sess.cookie, range: "bytes=0-" } });
+    expect(res.statusCode).toBe(206);
+    expect(res.headers["content-range"]).toBe("bytes 0-499/500");
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await t.db.auditLog.count({ where: { callId, action: "PLAY" } })).toBe(1);
+  });
+});
