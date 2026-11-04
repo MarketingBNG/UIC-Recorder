@@ -12,7 +12,7 @@ The deployment is three separate Coolify resources in one project. There's no do
 ## 2. `uic-api`: Application
 1. **+ New → Application → (your Git repo)**, build pack **Railpack**, base directory `/server`.
 2. Port `8000`. Domain: `https://calls.<yourdomain>`.
-3. **Pre-deployment command:** `npx prisma migrate deploy`
+3. Database migrations run automatically when the app starts (`server/railpack.json`); no pre-deployment command is needed.
 4. **Persistent storage → Directory mount:** source `/data/uic-recorder/recordings` → destination `/data/recordings`.
 5. **Environment variables:** see `server/.env.example`.
    - `DATABASE_URL` is the internal URL from step 1.
