@@ -4,6 +4,7 @@ import { callScope, requireSession } from "../auth/guards.js";
 import { HttpError, currentUser, type Deps } from "../context.js";
 import { Prisma, type AuditAction, type User } from "../generated/prisma/client.js";
 import { DeviceConfig, getSettings } from "../settings.js";
+import { firefliesUsage } from "../fireflies/budget.js";
 
 const ListQuery = z.object({
   q: z.string().trim().max(200).optional(),
@@ -226,17 +227,28 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get("/api/stats", managers, async () => {
-    const [byStatus, queue, disk, staleDevices] = await Promise.all([
+    const [byStatus, queue, disk, staleDevices, fireflies] = await Promise.all([
       deps.db.call.groupBy({ by: ["status"], _count: true }),
       deps.db.job.groupBy({ by: ["status"], _count: true }),
       deps.storage.diskUsage(),
       deps.db.device.count({ where: { revokedAt: null, lastSeenAt: { lt: new Date(Date.now() - 24 * 3600_000) } } }),
+      firefliesUsage(deps.db),
     ]);
     return {
       calls: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
       jobs: Object.fromEntries(queue.map((r) => [r.status, r._count])),
       disk: { ...disk, usedPct: Math.round((1 - disk.freeBytes / disk.totalBytes) * 100) },
       staleDevices,
+      // Banner state for the dashboard / app (additive).
+      fireflies: {
+        month: fireflies.month,
+        pct: fireflies.pct,
+        thresholds: fireflies.thresholds,
+        blocked: fireflies.blocked,
+        lastError: fireflies.lastError,
+        backlogGateReached: fireflies.backlogSent >= fireflies.approvedBacklogCount,
+        waitingBudgetJobs: fireflies.waitingBudgetJobs,
+      },
     };
   });
 }

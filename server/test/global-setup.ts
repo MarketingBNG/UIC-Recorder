@@ -5,9 +5,10 @@ import path from "node:path";
 
 // Spins up a throwaway PostgreSQL 18 and applies the real migrations.
 export default async function setup() {
-  const dir = path.resolve(".pgtest");
+  const dir = path.resolve(process.env["TEST_DB_DIR"] ?? ".pgtest");
   rmSync(dir, { recursive: true, force: true });
-  const port = 54339;
+  // TEST_DB_PORT lets a second checkout (git worktree) run tests at the same time.
+  const port = Number(process.env["TEST_DB_PORT"] ?? 54339);
   const pg = new EmbeddedPostgres({
     databaseDir: dir,
     port,

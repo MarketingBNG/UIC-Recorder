@@ -31,6 +31,8 @@ class Settings:
     whisper_compute_type: str
     openai_api_key: str | None
     openai_model: str
+    fireflies_api_key: str | None = None
+    fireflies_max_wait_s: float = 3600
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -52,4 +54,7 @@ class Settings:
             whisper_compute_type=e.get("WHISPER_COMPUTE_TYPE", "default"),
             openai_api_key=e.get("OPENAI_API_KEY") or None,
             openai_model=e.get("OPENAI_TRANSCRIBE_MODEL", "whisper-1"),
+            fireflies_api_key=e.get("FIREFLIES_API_KEY") or None,
+            # Give up waiting for one Fireflies transcript after this long (job is retried later).
+            fireflies_max_wait_s=float(e.get("FIREFLIES_MAX_WAIT_S", "3600")),
         )
