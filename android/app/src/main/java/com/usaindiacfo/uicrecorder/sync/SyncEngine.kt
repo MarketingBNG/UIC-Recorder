@@ -46,7 +46,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     /** Finds files since [sinceMs], matches them to CallLog and stores new ones. Files still being written are deferred. */
     suspend fun scan(cfg: DeviceConfig, sinceMs: Long): ScanResult = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val found = RecorderScanner(context).scan(cfg.recorderFolders, sinceMs, prefs.safTreeUri)
+        val found = RecorderScanner(context).scan(cfg.recorderFolders, sinceMs, prefs.safTreeUri, prefs.discoveredFolders, prefs.excludedFolders)
         val (fresh, ready) = found.partition { now - it.dateModified < SETTLE_MS }
         var inserted = 0
         for (chunk in ready.chunked(200)) {

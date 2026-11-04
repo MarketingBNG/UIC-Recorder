@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -64,10 +65,17 @@ fun SetupScreen(onDone: () -> Unit) {
         SetupChecks.optionalPermissions.filter { it != android.Manifest.permission.READ_CONTACTS }.all { SetupChecks.granted(context, it) }
     }
     val batteryOk = remember(tick) { SetupChecks.ignoringBatteryOptimizations(context) }
+    val restricted = remember(tick) { SetupChecks.backgroundRestricted(context) }
     var folderFound by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(tick, requiredOk, config.recorderFolders) {
         folderFound = if (requiredOk) SetupChecks.recorderFolderFound(context, config.recorderFolders) else null
     }
+
+    // Whole-phone scan: once after audio access is granted, and again on "Scan phone again".
+    val discovery by remember { SetupPrefs.discovery(context) }
+        .collectAsState(initial = SetupPrefs.Discovery(ran = true, folders = emptyList(), unticked = emptySet()))
+    val scanning by SetupPrefs.scanning.collectAsState()
+    LaunchedEffect(requiredOk, discovery.ran) { if (requiredOk && !discovery.ran) SetupPrefs.startDiscovery(context, config.recorderFolders) }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { tick++ }
     val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
@@ -105,11 +113,16 @@ fun SetupScreen(onDone: () -> Unit) {
         }
 
         Step(
-            done = batteryOk,
+            done = batteryOk && !restricted,
             title = "Turn off battery optimisation",
-            body = "Choose \"All apps\", find UIC Recorder and select \"Don't optimise\" so uploads aren't stopped.",
+            body = when {
+                restricted -> "Battery is set to \"Restricted\" for UIC Recorder, so uploads can't run. Open App settings > Battery and choose \"Unrestricted\"."
+                !batteryOk -> "Tap Allow in the box that appears so uploads aren't stopped. If no box appears, choose \"All apps\", find UIC Recorder and select \"Don't optimise\"."
+                else -> "Battery optimisation is off."
+            },
         ) {
-            Button(onClick = { SetupChecks.openBatterySettings(context) }) { Text("Open settings") }
+            if (!batteryOk) Button(onClick = { SetupChecks.openBatterySettings(context) }) { Text("Allow") }
+            if (restricted) OutlinedButton(onClick = { SetupChecks.openAppDetails(context) }) { Text("App settings") }
         }
 
         if (SetupChecks.hasAutostartScreen) {
@@ -128,24 +141,43 @@ fun SetupScreen(onDone: () -> Unit) {
             body = "In your Phone app open Settings > Call recording and record all calls automatically. UIC Recorder only uploads what the dialer records.",
         )
 
+        val enabled = discovery.enabled
         Step(
-            done = folderFound == true || safUri != null,
+            done = if (scanning) false else enabled.isNotEmpty() || folderFound == true || safUri != null,
             title = "Recorder folder",
-            keepActions = safUri != null,
+            keepActions = true,
             body = when {
                 !requiredOk -> "Allow access to recordings first."
-                folderFound == true -> "Call recordings found."
+                scanning -> "Scanning this phone for call recordings..."
+                discovery.folders.isNotEmpty() -> "Found call recordings in the folders below. Untick any that aren't call recordings."
                 safUri != null -> "Using the folder you picked."
+                folderFound == true -> "Call recordings found."
                 folderFound == null -> "Checking..."
-                else -> "No recordings found yet. Make a test call, or pick the folder where your dialer saves recordings."
+                else -> "No call recordings found on this phone. Make a test call and scan again, or choose the folder where your dialer saves recordings."
             },
-        ) {
-            if (folderFound == false || safUri != null) {
-                OutlinedButton(onClick = { runCatching { treeLauncher.launch(null) } }) {
-                    Text(if (safUri == null) "Pick folder" else "Change folder")
+            extra = if (requiredOk && !scanning && discovery.folders.isNotEmpty()) {
+                {
+                    discovery.folders.forEach { f ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = f.folder in enabled,
+                                onCheckedChange = { on -> scope.launch { SetupPrefs.setTicked(context, f.folder, on) } },
+                            )
+                            Text("${f.folder} (${f.files} files)", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
+            } else null,
+        ) {
+            if (requiredOk && !scanning) {
+                OutlinedButton(onClick = { SetupPrefs.startDiscovery(context, config.recorderFolders) }) { Text("Scan phone again") }
+                if (enabled.isEmpty() || safUri != null) {
+                    OutlinedButton(onClick = { runCatching { treeLauncher.launch(null) } }) {
+                        Text(if (safUri == null) "Choose folder" else "Change folder")
+                    }
+                }
+                if (safUri != null) TextButton(onClick = { scope.launch { SetupPrefs.setSafTreeUri(context, null) } }) { Text("Clear") }
             }
-            if (safUri != null) TextButton(onClick = { scope.launch { SetupPrefs.setSafTreeUri(context, null) } }) { Text("Clear") }
         }
 
         Spacer(Modifier.size(8.dp))
@@ -176,6 +208,7 @@ private fun Step(
     body: String,
     optional: Boolean = false,
     keepActions: Boolean = false,
+    extra: (@Composable () -> Unit)? = null,
     actions: (@Composable () -> Unit)? = null,
 ) {
     Card(Modifier.fillMaxWidth()) {
@@ -186,6 +219,7 @@ private fun Step(
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(title, style = MaterialTheme.typography.titleSmall)
                 Text(body, style = MaterialTheme.typography.bodySmall)
+                extra?.invoke()
                 if (actions != null && (done != true || keepActions)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { actions() }
             }
         }

@@ -2,6 +2,16 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Staff don't know where their recorder saves calls
+- **Problem:** recordings never uploaded because the phone's recorder folder wasn't on our list.
+- **Cause:** every brand saves call recordings in a different folder.
+- **Fix:** setup now scans the whole phone for folders that look like call recordings and lists them with checkboxes; "Choose folder" is the manual fallback.
+
+## Battery step stayed red after changing battery settings
+- **Problem:** user changed battery settings but setup still said battery optimisation was on.
+- **Cause:** the app was set to "Restricted", a separate setting from "Don't optimise"; only one was changed.
+- **Fix:** the Allow button now opens Android's one-tap "Allow" box, and setup warns about "Restricted" with an App settings button (Battery > "Unrestricted").
+
 ## App can't reach the server from the emulator / USB phone
 - **Problem:** "Can't reach the server" after Google sign-in.
 - **Cause:** the phone couldn't reach the dev server's port on this PC.
