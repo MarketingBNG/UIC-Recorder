@@ -115,3 +115,17 @@ describe("dashboard session", () => {
     expect(ok.statusCode).toBe(201);
   });
 });
+
+describe("app uses the dashboard API with its token", () => {
+  it("scopes by role and needs no origin header", async () => {
+    const agent = await t.loginDevice(uniqueEmail());
+    const me = await t.app.inject({ method: "GET", url: "/api/me", headers: agent.headers });
+    expect(me.statusCode).toBe(200);
+    expect((await t.app.inject({ method: "GET", url: "/api/calls", headers: agent.headers })).statusCode).toBe(200);
+    expect((await t.app.inject({ method: "GET", url: "/api/users", headers: agent.headers })).statusCode).toBe(403);
+    const admin = await t.loginDevice(uniqueEmail(), "ADMIN");
+    expect((await t.app.inject({ method: "GET", url: "/api/users", headers: admin.headers })).statusCode).toBe(200);
+    const bad = { authorization: "Bearer nope" };
+    expect((await t.app.inject({ method: "GET", url: "/api/me", headers: bad })).statusCode).toBe(401);
+  });
+});

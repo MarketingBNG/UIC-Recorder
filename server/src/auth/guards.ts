@@ -32,9 +32,18 @@ export function requireDevice(deps: Deps) {
   };
 }
 
-/** Dashboard requests: encrypted session cookie + user still active. */
+/**
+ * Dashboard requests: encrypted session cookie + user still active.
+ * The Android app uses the same endpoints with its access token (no cookie, so no CSRF check).
+ */
 export function requireSession(deps: Deps, roles?: Role[]) {
+  const device = requireDevice(deps);
   return async (req: FastifyRequest) => {
+    if (bearer(req)) {
+      await device(req);
+      if (roles && !roles.includes(req.user!.role)) throw new HttpError(403, "Forbidden");
+      return;
+    }
     const cookie = req.cookies[SESSION_COOKIE];
     if (!cookie) throw new HttpError(401, "Not signed in");
     let uid: unknown;
