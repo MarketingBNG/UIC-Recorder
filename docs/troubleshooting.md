@@ -2,6 +2,10 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Site returned 502 on every other request
+- **Cause:** uic-worker was cloned from uic-api and inherited its routing labels, so the proxy sent half the traffic for calls.usaindiacfo.us to the worker. The clone also inherited the `npx prisma migrate deploy` pre-deploy command, which fails in the Python worker.
+- **Fix:** cleared `custom_labels`, `fqdn` and the pre/post-deploy commands on uic-worker and redeployed it. When cloning an app in Coolify, check those fields.
+
 ## Coolify: database had no tables after first deploy
 - **Cause:** Coolify skips the pre-deployment command on an app's first deploy ("No running containers found").
 - **Fix:** migrations now run on every container start (`server/railpack.json` start command).
