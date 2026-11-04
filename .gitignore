@@ -36,3 +36,6 @@ __pycache__/
 *.iml
 .DS_Store
 Thumbs.db
+
+# Claude Code worktrees (temporary branches)
+.claude/worktrees/
