@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val apiUrl = providers.gradleProperty("uic.apiUrl")
+
 android {
     namespace = "com.usaindiacfo.uicrecorder"
     compileSdk = 37
@@ -16,12 +18,15 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         // Set in ~/.gradle/gradle.properties or with -P; the web OAuth client ID is the token audience.
-        buildConfigField("String", "API_URL", "\"${providers.gradleProperty("uic.apiUrl").getOrElse("http://10.0.2.2:8000")}\"")
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${providers.gradleProperty("uic.googleWebClientId").getOrElse("")}\"")
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("http://10.0.2.2:8000")}\"")
+        }
         release {
+            buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("")}\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -37,6 +42,16 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+}
+
+// Release builds must point at an https server; the http fallback is debug-only.
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    val url = apiUrl.orNull
+    doFirst {
+        if (url == null || !url.startsWith("https://")) {
+            throw GradleException("Release builds need -Puic.apiUrl=https://... (got: ${url ?: "nothing"})")
+        }
     }
 }
 
