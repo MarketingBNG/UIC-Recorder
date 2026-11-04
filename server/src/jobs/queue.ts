@@ -25,7 +25,7 @@ export async function claimJobs(db: Db, workerId: string, limit: number): Promis
       "updated_at" = now()
     WHERE "id" IN (
       SELECT "id" FROM "jobs"
-      WHERE ("status" = 'QUEUED' AND "run_after" <= now())
+      WHERE ("status" IN ('QUEUED', 'WAITING_BUDGET') AND "run_after" <= now())
          OR ("status" = 'RUNNING' AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES})
              AND "attempts" < ${MAX_ATTEMPTS})
       ORDER BY "priority" DESC, "created_at" ASC

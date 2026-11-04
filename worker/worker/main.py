@@ -10,7 +10,7 @@ import structlog
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .config import Settings, load_dotenv
-from .providers import PermanentError, Provider, load_provider
+from .providers import Deferred, PermanentError, Provider, load_provider
 
 log = structlog.get_logger()
 
@@ -78,6 +78,43 @@ class Api:
             return
         res.raise_for_status()
 
+    # ---- Fireflies (server-side budget + signed audio URL) ----
+
+    @_network_retry
+    def fireflies_reserve(self, job_id: str) -> dict:
+        res = self.http.post(f"/internal/fireflies/jobs/{job_id}/reserve", json={"workerId": self.worker_id})
+        if res.status_code == 409:
+            raise Deferred("lost job lock")
+        res.raise_for_status()
+        return res.json()
+
+    @_network_retry
+    def fireflies_audio_url(self, call_id: str) -> dict:
+        res = self.http.get(f"/internal/fireflies/audio-url/{call_id}")
+        res.raise_for_status()
+        return res.json()
+
+    @_network_retry
+    def fireflies_uploaded(self, reservation_id: str, transcript_id: str | None = None) -> None:
+        body = {"transcriptId": transcript_id} if transcript_id else {}
+        res = self.http.post(f"/internal/fireflies/reservations/{reservation_id}/uploaded", json=body)
+        if res.status_code != 409:
+            res.raise_for_status()
+
+    @_network_retry
+    def fireflies_finalize(self, reservation_id: str, actual_minutes: int | None = None) -> None:
+        body = {"actualMinutes": actual_minutes} if actual_minutes is not None else {}
+        res = self.http.post(f"/internal/fireflies/reservations/{reservation_id}/finalize", json=body)
+        res.raise_for_status()
+
+    @_network_retry
+    def fireflies_block(self, error: str, job_id: str | None = None) -> None:
+        body: dict = {"error": error[:2000]}
+        if job_id:
+            body |= {"jobId": job_id, "workerId": self.worker_id}
+        res = self.http.post("/internal/fireflies/block", json=body)
+        res.raise_for_status()
+
 
 class _Heartbeat:
     """Keeps the job lock alive while a long transcription runs."""
@@ -106,8 +143,16 @@ def process_job(api: Api, provider: Provider, job: dict, language: str | None) -
     with tempfile.TemporaryDirectory(prefix="uic-") as tmp, _Heartbeat(api, job_id):
         audio = Path(tmp) / f"audio{_EXT.get(job.get('mimeType') or '', '.bin')}"
         try:
-            api.download(job["audioPath"], audio)
-            t = provider.transcribe(audio, job.get("mimeType"), language)
+            if getattr(provider, "remote", False):
+                # e.g. Fireflies: fetches the audio itself from a signed URL.
+                t = provider.transcribe_job(api, job, language)  # type: ignore[attr-defined]
+            else:
+                api.download(job["audioPath"], audio)
+                t = provider.transcribe(audio, job.get("mimeType"), language)
+        except Deferred as e:
+            # The API already re-queued the job (budget / batch gate / hard stop).
+            log.info("job deferred", job_id=job_id, reason=str(e))
+            return
         except PermanentError as e:
             log.error("job failed permanently", job_id=job_id, error=str(e))
             api.post_result(job_id, {"ok": False, "error": str(e), "retryable": False})

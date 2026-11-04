@@ -46,6 +46,8 @@ enum JobStatus {
   RUNNING
   DONE
   FAILED
+  // Deferred by the Fireflies budget / batch gate; claimable again after run_after.
+  WAITING_BUDGET
 }
 
 enum AuditAction {
@@ -143,6 +145,8 @@ model Call {
   transcript Transcript?
   jobs       Job[]
 
+  firefliesReservations FirefliesReservation[]
+
   @@unique([userId, originalSha256])
   @@index([userId, startedAt(sort: Desc)])
   @@index([startedAt(sort: Desc)])
@@ -206,7 +210,37 @@ model Setting {
   id           Int      @id @default(1)
   deviceConfig Json     @map("device_config")
   latestApp    Json?    @map("latest_app")
+  // Fireflies budget settings + hard-stop state (see src/fireflies/settings.ts).
+  fireflies    Json?
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+enum FirefliesReservationStatus {
+  RESERVED // minutes held while the job runs
+  COMMITTED // sent to Fireflies; counts as used (actual minutes when known)
+  RELEASED // never uploaded; minutes returned
+}
+
+// Fireflies upload minutes, one row per call per month. Monthly usage is
+// aggregated from these rows (calendar month in UTC, like Fireflies' reset).
+model FirefliesReservation {
+  id            String                     @id @default(uuid(7)) @db.Uuid
+  callId        String                     @map("call_id") @db.Uuid
+  month         String // "YYYY-MM" (UTC)
+  minutes       Int
+  actualMinutes Int?                       @map("actual_minutes")
+  live          Boolean
+  status        FirefliesReservationStatus @default(RESERVED)
+  uploadedAt    DateTime?                  @map("uploaded_at")
+  transcriptId  String?                    @map("transcript_id")
+  createdAt     DateTime                   @default(now()) @map("created_at")
+  updatedAt     DateTime                   @updatedAt @map("updated_at")
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@index([month, status])
+  @@index([callId, status])
+  @@map("fireflies_reservations")
 }

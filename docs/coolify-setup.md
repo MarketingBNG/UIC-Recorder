@@ -56,3 +56,23 @@ Connect the GitHub app in Coolify. Pushing to `main` then redeploys `uic-api` an
 4. It's safe to stop and re-run. Files already on the server are skipped, and failures are listed in `import-failures-<date>.log`.
 5. Imported calls queue behind live calls. To finish faster, raise `WORKER_CONCURRENCY` on `uic-worker`, or run extra workers (for example on a rented GPU, see above). They all share one queue.
 6. Remove `IMPORT_TOKEN` from `uic-api` when the import is finished.
+
+## Fireflies transcription
+Fireflies downloads the audio from our server, so `uic-api` must be reachable over **https** at `PUBLIC_URL`.
+
+1. On `uic-worker`, set `TRANSCRIBE_PROVIDER=fireflies` and `FIREFLIES_API_KEY=<API key from Fireflies → Integrations>`. `FIREFLIES_MAX_WAIT_S` is optional (default 3600); it caps how long one job waits for its transcript. Redeploy. `uic-api` needs no new variables because the signed audio links use `JWT_SECRET` and `PUBLIC_URL`.
+2. How a job runs:
+   1. The worker asks the API to reserve the call's minutes.
+   2. It gets a signed link, `PUBLIC_URL/public/audio/<callId>.<ext>?exp=…&sig=…`. The link works for 3 hours and only for that one call.
+   3. It calls `uploadAudio` and polls until the transcript is ready.
+   4. It saves the transcript with speakers and timestamps and reports the actual minutes.
+   5. It deletes the transcript in Fireflies, unless `deleteAfterFetch` is off.
+3. **Budget.** Admins change it with `PUT /api/settings/fireflies`; managers can read `GET /api/fireflies/usage`.
+   - `budgetMinutes` (default 16200) is the limit per calendar month in UTC. Fireflies counts API uploads against the team's monthly minutes, and going over may be charged.
+   - `liveReservePct` (default 10) keeps part of the budget for live calls. Backlog and import calls stop at the budget minus this reserve; live calls can use the whole budget.
+   - `approvedBacklogCount` (default 20) is the total number of backlog and import calls that may be sent. Once it's reached, backlog sending pauses until an admin raises it. Live calls aren't affected.
+   - `deleteAfterFetch` (default true) and `enabled` are on/off switches. Send `clearBlock: true` to lift a hard stop.
+   - Jobs held back show as `WAITING_BUDGET` in `/api/stats` and start again by themselves. Jobs held by a gate are retried every hour; jobs held because the budget is used up wait until the next month.
+4. **Hard stop.** Some Fireflies errors mean the plan, payment or quota is the problem: `paid_required`, `account_cancelled`, `require_ai_credits`, `feature_disabled`, or a message mentioning a quota or an exceeded limit. When one arrives, all Fireflies sends stop until the next month or until an admin sends `clearBlock`. `/api/stats` shows it as `fireflies.blocked` and `fireflies.lastError`.
+5. **Unsupported formats.** Fireflies only accepts mp3, mp4, m4a, wav and ogg. Calls recorded as amr, 3gp, raw aac, opus or webm fail with `UNSUPPORTED_FORMAT` and aren't retried. To transcribe them, run a worker with another provider (`openai` or `faster_whisper`) and re-queue those jobs.
+6. **Switching provider.** Change `TRANSCRIBE_PROVIDER` on `uic-worker` and redeploy. All workers share one queue, so you can also run two workers with different providers at the same time.

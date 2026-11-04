@@ -17,6 +17,10 @@ class PermanentError(Exception):
     """Failure that retrying won't fix (bad config, unsupported audio)."""
 
 
+class Deferred(Exception):
+    """The API already put the job back (budget, batch gate, hard stop); post no result."""
+
+
 class Provider(Protocol):
     name: str
 
@@ -37,5 +41,9 @@ def load_provider(settings: Settings) -> Provider:
             from .openai import OpenAIProvider
 
             return OpenAIProvider(settings)
+        case "fireflies":
+            from .fireflies import FirefliesProvider
+
+            return FirefliesProvider(settings)
         case other:
             raise SystemExit(f"Unknown TRANSCRIBE_PROVIDER: {other}")

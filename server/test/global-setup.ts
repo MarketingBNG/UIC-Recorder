@@ -7,7 +7,8 @@ import path from "node:path";
 export default async function setup() {
   const dir = path.resolve(".pgtest");
   rmSync(dir, { recursive: true, force: true });
-  const port = 54339;
+  // TEST_DB_PORT lets a second checkout (git worktree) run tests at the same time.
+  const port = Number(process.env["TEST_DB_PORT"] ?? 54339);
   const pg = new EmbeddedPostgres({
     databaseDir: dir,
     port,
