@@ -6,6 +6,7 @@ plugins {
 }
 
 val apiUrl = providers.gradleProperty("uic.apiUrl")
+val releaseApiUrl = apiUrl.orElse(providers.gradleProperty("uic.releaseApiUrl"))
 
 android {
     namespace = "com.usaindiacfo.uicrecorder"
@@ -26,7 +27,7 @@ android {
             buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("http://localhost:8000")}\"")
         }
         release {
-            buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("")}\"")
+            buildConfigField("String", "API_URL", "\"${releaseApiUrl.getOrElse("")}\"")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -47,7 +48,7 @@ android {
 
 // Release builds must point at an https server; the http fallback is debug-only.
 tasks.matching { it.name == "preReleaseBuild" }.configureEach {
-    val url = apiUrl.orNull
+    val url = releaseApiUrl.orNull
     doFirst {
         if (url == null || !url.startsWith("https://")) {
             throw GradleException("Release builds need -Puic.apiUrl=https://... (got: ${url ?: "nothing"})")
