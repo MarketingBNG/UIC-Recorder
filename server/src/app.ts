@@ -63,8 +63,12 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => dashboardRoutes(s, deps));
 
   // Built dashboard (React SPA), served from the same origin.
-  const publicDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../public");
-  if (existsSync(publicDir)) {
+  // Built: dist/src/app.js -> dist/public. Dev (tsx src/app.ts): falls back to dist/public too.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const publicDir = [path.resolve(here, "../public"), path.resolve(here, "../dist/public")].find((d) =>
+    existsSync(path.join(d, "index.html")),
+  );
+  if (publicDir) {
     await app.register(fastifyStatic, { root: publicDir, wildcard: false });
     app.setNotFoundHandler((req, reply) => {
       const isApi = /^\/(api|v1|internal|auth)\b/.test(req.url);

@@ -8,14 +8,16 @@
   },
   "scripts": {
     "dev": "tsx watch src/main.ts",
-    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "build": "prisma generate && tsc -p tsconfig.build.json && npm run build:dashboard",
     "start": "node dist/src/main.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p dashboard/tsconfig.json",
     "test": "vitest run",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "dev:db": "tsx scripts/dev-db.ts",
-    "db:migrate:dev": "prisma migrate dev"
+    "db:migrate:dev": "prisma migrate dev",
+    "build:dashboard": "npm --prefix dashboard ci --include=dev --no-audit --no-fund && npm --prefix dashboard run build",
+    "dev:dashboard": "npm --prefix dashboard run dev"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",
