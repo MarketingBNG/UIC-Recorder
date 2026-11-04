@@ -137,6 +137,21 @@ describe("budget reservation", () => {
     expect(usage).toMatchObject({ usedMinutes: 7, reservedMinutes: 0 });
   });
 
+  it("never re-uploads a call whose uploaded reservation was settled meanwhile", async () => {
+    await setCfg({ budgetMinutes: 100 });
+    const a = await runningJob({ durationS: 600 });
+    const ra = (await reserveHttp(a.jobId)).json();
+    await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${ra.reservationId}/uploaded`, headers: t.workerHeaders, payload: {} });
+    // Simulate the stale settle (or a hard-stop park until next month).
+    await t.db.firefliesReservation.update({ where: { id: ra.reservationId }, data: { status: "COMMITTED" } });
+    const again = (await reserveHttp(a.jobId)).json();
+    expect(again).toMatchObject({ status: "reserved", reservationId: ra.reservationId, uploaded: true });
+    expect(await t.db.firefliesReservation.count({ where: { callId: a.callId } })).toBe(1);
+    await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${ra.reservationId}/finalize`, headers: t.workerHeaders, payload: { actualMinutes: 4 } });
+    const usage = (await t.app.inject({ method: "GET", url: "/api/fireflies/usage", headers: await adminSession() })).json();
+    expect(usage).toMatchObject({ usedMinutes: 4, reservedMinutes: 0 });
+  });
+
   it("keeps the live reserve away from backlog calls", async () => {
     await setCfg({ budgetMinutes: 100, liveReservePct: 10 });
     for (let i = 0; i < 9; i++) {

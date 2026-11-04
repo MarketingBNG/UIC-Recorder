@@ -68,6 +68,8 @@ export async function firefliesRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get<{ Params: { file: string }; Querystring: { exp?: string; sig?: string } }>(
     "/public/audio/:file",
+    // Info-level request logs would contain the working signed URL (exp & sig); keep them out.
+    { logLevel: "warn" },
     async (req, reply) => {
       // "<uuid>" or "<uuid>.<ext>"; anything else (incl. traversal attempts) is a 404.
       const m = /^([0-9a-f-]{36})(\.[a-z0-9]{1,5})?$/.exec(req.params.file);
@@ -101,21 +103,25 @@ export async function firefliesRoutes(app: FastifyInstance, deps: Deps) {
 
   app.put("/api/settings/fireflies", admins, async (req) => {
     const { clearBlock, ...patch } = SettingsPatch.parse(req.body);
-    const state = await getFirefliesState(deps.db);
-    const next = { ...state, ...patch };
-    if (clearBlock) {
-      next.blockedUntil = null;
-      // Jobs parked by the hard stop become runnable again right away.
-      await deps.db.job.updateMany({
-        where: { status: "WAITING_BUDGET", lastError: { startsWith: "WAITING_BUDGET: BLOCKED" } },
-        data: { runAfter: new Date() },
-      });
-    }
-    await saveFirefliesState(deps.db, next);
-    // Raising the batch gate or budget, or re-enabling, should not leave jobs parked for an hour.
-    if (patch.approvedBacklogCount !== undefined || patch.budgetMinutes !== undefined || patch.enabled || patch.liveReservePct !== undefined) {
-      await deps.db.job.updateMany({ where: { status: "WAITING_BUDGET", runAfter: { gt: new Date() } }, data: { runAfter: new Date() } });
-    }
+    // Same advisory lock as reserve/block, so a concurrent hard stop is never overwritten.
+    await deps.db.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('uic:fireflies-budget'))`;
+      const state = await getFirefliesState(tx);
+      const next = { ...state, ...patch };
+      if (clearBlock) {
+        next.blockedUntil = null;
+        // Jobs parked by the hard stop become runnable again right away.
+        await tx.job.updateMany({
+          where: { status: "WAITING_BUDGET", lastError: { startsWith: "WAITING_BUDGET: BLOCKED" } },
+          data: { runAfter: new Date() },
+        });
+      }
+      await saveFirefliesState(tx, next);
+      // Raising the batch gate or budget, or re-enabling, should not leave jobs parked for an hour.
+      if (patch.approvedBacklogCount !== undefined || patch.budgetMinutes !== undefined || patch.enabled || patch.liveReservePct !== undefined) {
+        await tx.job.updateMany({ where: { status: "WAITING_BUDGET", runAfter: { gt: new Date() } }, data: { runAfter: new Date() } });
+      }
+    });
     return firefliesUsage(deps.db);
   });
 }

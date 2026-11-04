@@ -87,9 +87,15 @@ export async function reserveForJob(db: Db, jobId: string, workerId: string, now
     const state = await getFirefliesState(tx);
 
     // A retry of a job that already reserved (maybe already uploaded) reuses that reservation.
-    const existing = await tx.firefliesReservation.findFirst({ where: { callId: job.callId, status: "RESERVED" } });
+    // An already-uploaded call is never uploaded (and paid for) again, even if its row was
+    // settled to COMMITTED meanwhile (stale settle, or parked by a hard stop until next month).
+    const existing =
+      (await tx.firefliesReservation.findFirst({ where: { callId: job.callId, uploadedAt: { not: null } }, orderBy: { createdAt: "desc" } })) ??
+      (await tx.firefliesReservation.findFirst({ where: { callId: job.callId, status: "RESERVED" } }));
     if (existing) {
-      await tx.firefliesReservation.update({ where: { id: existing.id }, data: { updatedAt: now } });
+      if (existing.status === "RESERVED") {
+        await tx.firefliesReservation.update({ where: { id: existing.id }, data: { updatedAt: now } });
+      }
       return reserved(existing, state);
     }
 
@@ -151,7 +157,13 @@ export async function markUploaded(db: Db, reservationId: string, transcriptId?:
 /** Settles a reservation: uploaded ones become used (actual minutes when known), others are released. */
 export async function finalizeReservation(db: Db, reservationId: string, actualMinutes?: number) {
   const r = await db.firefliesReservation.findUnique({ where: { id: reservationId } });
-  if (!r || r.status !== "RESERVED") return false;
+  if (!r || r.status === "RELEASED") return false;
+  if (r.status === "COMMITTED") {
+    // Settled earlier (stale settle); still record the real minutes once known.
+    if (actualMinutes === undefined) return false;
+    await db.firefliesReservation.update({ where: { id: r.id }, data: { actualMinutes } });
+    return true;
+  }
   await db.firefliesReservation.update({
     where: { id: r.id },
     data: r.uploadedAt

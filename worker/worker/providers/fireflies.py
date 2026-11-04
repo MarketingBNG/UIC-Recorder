@@ -50,6 +50,9 @@ HARD_STOP_TEXT = re.compile(
     re.I,
 )
 
+# Rate limiting is transient; never mistake it for a quota hard stop.
+RATE_TEXT = re.compile(r"rate|too many|per minute|requests", re.I)
+
 UPLOAD = """mutation uploadAudio($input: AudioUploadInput) {
   uploadAudio(input: $input) { success title message }
 }"""
@@ -97,12 +100,12 @@ class FirefliesProvider:
 
     # ---- GraphQL ------------------------------------------------------------
 
-    def _gql(self, query: str, variables: dict, max_tries: int = 6) -> dict:
+    def _gql(self, query: str, variables: dict, max_tries: int = 6, retry_transport: bool = True) -> dict:
         for attempt in range(1, max_tries + 1):
             try:
                 res = self.client.post(URL, json={"query": query, "variables": variables})
             except httpx.TransportError:
-                if attempt == max_tries:
+                if attempt == max_tries or not retry_transport:
                     raise
                 self.sleep(min(2**attempt, 60))
                 continue
@@ -122,7 +125,7 @@ class FirefliesProvider:
                 continue
             for e, code in zip(errors, codes):
                 msg = str(e.get("message", ""))
-                if code in HARD_STOP_CODES or HARD_STOP_TEXT.search(msg):
+                if code in HARD_STOP_CODES or (HARD_STOP_TEXT.search(msg) and not RATE_TEXT.search(msg)):
                     raise HardStop(f"{code or 'error'}: {msg}"[:1000])
             if res.status_code >= 500 and not errors:
                 if attempt == max_tries:
@@ -167,7 +170,14 @@ class FirefliesProvider:
                 }
                 if language:
                     inp["custom_language"] = language
-                data = self._gql(UPLOAD, {"input": inp})
+                try:
+                    # No transport retry: a dropped connection may mean Fireflies already
+                    # queued the file. Treat it as uploaded so the retry only polls.
+                    data = self._gql(UPLOAD, {"input": inp}, retry_transport=False)
+                except httpx.TransportError:
+                    api.fireflies_uploaded(reservation)
+                    uploaded = True
+                    raise
                 out = data.get("uploadAudio") or {}
                 if not out.get("success"):
                     raise FirefliesError("upload_failed", str(out.get("message") or out))

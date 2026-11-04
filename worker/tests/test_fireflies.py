@@ -166,3 +166,25 @@ def test_poll_timeout_is_retryable_and_keeps_reservation():
     body = json.loads(routes["result"].calls.last.request.content)
     assert body["ok"] is False and body["retryable"] is True and "TimeoutError" in body["error"]
     assert not routes["finalize"].called  # uploaded: retry polls instead of uploading again
+
+
+@respx.mock
+def test_rate_limit_wording_is_not_a_hard_stop():
+    api, ff = make([])
+    routes = mock_api()
+    graphql({"uploadAudio": [httpx.Response(200, json={"errors": [
+        {"message": "Rate limit exceeded", "code": "some_code"}]})]})
+    process_job(api, ff, JOB, None)
+    assert not routes["block"].called
+
+
+@respx.mock
+def test_dropped_upload_connection_counts_as_uploaded():
+    api, ff = make([])
+    routes = mock_api()
+    respx.post(URL).mock(side_effect=httpx.ReadTimeout("boom"))
+    process_job(api, ff, JOB, None)
+    assert routes["uploaded"].called  # retry will only poll, never upload twice
+    assert not routes["finalize"].called
+    assert respx.calls.call_count >= 1
+    assert sum(1 for c in respx.calls if str(c.request.url) == URL) == 1
