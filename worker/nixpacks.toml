@@ -1,3 +1,0 @@
-# Coolify (Nixpacks) build for uic-worker. Python 3.13 from .python-version.
-[start]
-cmd = "python -m worker"

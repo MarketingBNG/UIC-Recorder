@@ -41,8 +41,9 @@ object SyncScheduler {
     fun enqueueTrigger(context: Context, policy: ExistingWorkPolicy) {
         val constraints = Constraints.Builder()
             .addContentUriTrigger(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, true)
-            .setTriggerContentUpdateDelay(5, TimeUnit.SECONDS)
-            .setTriggerContentMaxDelay(60, TimeUnit.SECONDS)
+            // Short waits so a new call uploads within seconds; the update delay still lets the recorder finish writing.
+            .setTriggerContentUpdateDelay(2, TimeUnit.SECONDS)
+            .setTriggerContentMaxDelay(10, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(
             TRIGGER, policy, OneTimeWorkRequestBuilder<NewRecordingWorker>().setConstraints(constraints).build(),

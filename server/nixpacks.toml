@@ -1,9 +1,0 @@
-# Coolify (Nixpacks) build for uic-api. Node version comes from package.json "engines".
-[phases.install]
-cmds = ["npm ci"]
-
-[phases.build]
-cmds = ["npm run build"]
-
-[start]
-cmd = "node dist/src/main.js"

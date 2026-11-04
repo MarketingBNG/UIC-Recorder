@@ -1,6 +1,6 @@
 # Deploying UIC Recorder on Coolify
 
-The deployment is three separate Coolify resources in one project. There's no docker-compose file and no Dockerfile; Coolify's Nixpacks builder builds everything.
+The deployment is three separate Coolify resources in one project. There's no docker-compose file and no Dockerfile; Coolify's Railpack builder builds everything (config in `railpack.json`).
 
 ## 1. `uic-db`: PostgreSQL
 1. **+ New → Database → PostgreSQL** and pick image tag `postgres:18-alpine`.
@@ -10,7 +10,7 @@ The deployment is three separate Coolify resources in one project. There's no do
 5. Copy the **internal** connection URL, which looks like `postgresql://…@<uuid>:5432/uic`.
 
 ## 2. `uic-api`: Application
-1. **+ New → Application → (your Git repo)**, build pack **Nixpacks**, base directory `/server`.
+1. **+ New → Application → (your Git repo)**, build pack **Railpack**, base directory `/server`.
 2. Port `8000`. Domain: `https://calls.<yourdomain>`.
 3. **Pre-deployment command:** `npx prisma migrate deploy`
 4. **Persistent storage → Directory mount:** source `/data/uic-recorder/recordings` → destination `/data/recordings`.
@@ -23,7 +23,7 @@ The deployment is three separate Coolify resources in one project. There's no do
 6. Deploy, then open `https://calls.<yourdomain>/health`. It should return `{"ok":true}`.
 
 ## 3. `uic-worker`: Application
-1. **+ New → Application → same repo**, build pack **Nixpacks**, base directory `/worker`.
+1. **+ New → Application → same repo**, build pack **Railpack**, base directory `/worker`.
 2. No domain, and no port exposed.
 3. Environment: see `worker/.env.example`.
    - `API_URL` is the **internal** address of `uic-api` (Coolify shows it, e.g. `http://<uuid>:8000`).

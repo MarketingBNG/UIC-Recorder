@@ -2,6 +2,15 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Coolify: Nixpacks deprecated
+- **Cause:** Nixpacks is in maintenance mode; Coolify 4.6 defaults to Railpack.
+- **Fix:** replaced `nixpacks.toml` with `railpack.json` in `server/` and `worker/`; pick **Railpack** in Coolify.
+
+## New recordings didn't upload automatically
+- **Problem:** a new recording only uploaded when the app had just been open.
+- **Cause:** the app's battery setting was "Restricted", so Android blocked its background jobs.
+- **Fix:** set Battery to "Unrestricted" (setup now warns about this). After that, uploads start ~50 s after the call ends (Android batches "new file" events).
+
 ## Staff don't know where their recorder saves calls
 - **Problem:** recordings never uploaded because the phone's recorder folder wasn't on our list.
 - **Cause:** every brand saves call recordings in a different folder.
