@@ -23,7 +23,7 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("http://10.0.2.2:8000")}\"")
+            buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("http://localhost:8000")}\"")
         }
         release {
             buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("")}\"")
