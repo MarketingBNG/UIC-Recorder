@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Fireflies key not found in worker/.env
+- **Cause:** the key was pasted into `server/.env`, with a space before `=` (`FIREFLIES_API_KEY ="..."`).
+- **Fix:** the worker reads `worker/.env`; write `KEY="value"` with no spaces around `=`.
+
+## Server build would fail on Coolify (Railpack skips dev packages)
+- **Cause:** `typescript` and `@types/node` were dev-only, so `npm run build` failed after a production install.
+- **Fix:** moved both to regular dependencies; tested with `npm ci --omit=dev` then `npm run build`.
+
 ## Site returned 502 on every other request
 - **Cause:** uic-worker was cloned from uic-api and inherited its routing labels, so the proxy sent half the traffic for calls.usaindiacfo.us to the worker. The clone also inherited the `npx prisma migrate deploy` pre-deploy command, which fails in the Python worker.
 - **Fix:** cleared `custom_labels`, `fqdn` and the pre/post-deploy commands on uic-worker and redeployed it. When cloning an app in Coolify, check those fields.
