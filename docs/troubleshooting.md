@@ -2,6 +2,10 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Coolify: database had no tables after first deploy
+- **Cause:** Coolify skips the pre-deployment command on an app's first deploy ("No running containers found").
+- **Fix:** migrations now run on every container start (`server/railpack.json` start command).
+
 ## Coolify: Nixpacks deprecated
 - **Cause:** Nixpacks is in maintenance mode; Coolify 4.6 defaults to Railpack.
 - **Fix:** replaced `nixpacks.toml` with `railpack.json` in `server/` and `worker/`; pick **Railpack** in Coolify.
