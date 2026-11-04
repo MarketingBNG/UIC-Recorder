@@ -71,4 +71,31 @@ class ApiClientTest {
         }
         assertEquals(true, tokens.failed)
     }
+
+    @Test fun firefliesPatchSendsOnlySetFields() = runBlocking {
+        server.enqueue(
+            json(200, """{"month":"2026-11","enabled":true,"budgetMinutes":16200,"liveReservePct":10,"usedMinutes":0,
+                "reservedMinutes":0,"pct":0,"thresholds":[],"approvedBacklogCount":40,"backlogSent":20,
+                "deleteAfterFetch":true,"blocked":false,"blockedUntil":null,"lastError":null,"lastErrorAt":null,"waitingBudgetJobs":0}"""),
+        )
+        val u = api.putFireflies(FirefliesPatch(approvedBacklogCount = 40))
+        assertEquals(40, u.approvedBacklogCount)
+        val req = server.takeRequest()
+        assertEquals("PUT", req.method)
+        assertEquals("/api/settings/fireflies", req.url.encodedPath)
+        assertEquals("""{"approvedBacklogCount":40}""", req.body?.utf8())
+    }
+
+    @Test fun statsDecodesWithAndWithoutFireflies() = runBlocking {
+        val base = """"calls":{},"jobs":{"WAITING_BUDGET":2},"disk":{"totalBytes":10,"freeBytes":5,"usedPct":50},"staleDevices":0"""
+        server.enqueue(json(200, "{$base}"))
+        server.enqueue(
+            json(200, """{$base,"fireflies":{"month":"2026-11","pct":81.5,"thresholds":[50,80],"blocked":false,
+                "lastError":null,"backlogGateReached":true,"waitingBudgetJobs":2}}"""),
+        )
+        assertNull(api.stats().fireflies)
+        val f = api.stats().fireflies!!
+        assertEquals(listOf(50, 80), f.thresholds)
+        assertEquals(true, f.backlogGateReached)
+    }
 }

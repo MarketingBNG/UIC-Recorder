@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type CallStatus, type Device, type Stats } from "../api";
 import { useMe } from "../App";
-import { STATUS_LABEL, ago, formatBytes, formatWhen, personName } from "../format";
+import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
+import { FirefliesPanel } from "../components/Fireflies";
 import { Badge, ConfirmDialog, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
 
 const STALE_MS = 24 * 3600_000;
@@ -51,6 +52,8 @@ export function HealthPage() {
 
       {stats.data && <StatsHeader s={stats.data} />}
       {stats.isError && <p className="mb-4 text-sm text-amber-700 dark:text-amber-300">Server stats unavailable: {stats.error.message}</p>}
+
+      <FirefliesPanel />
 
       {devices.isPending ? (
         <Spinner label="Loading devices" />
@@ -135,7 +138,7 @@ function StatsHeader({ s }: { s: Stats }) {
       <div className={`mt-1 text-xl font-semibold tabular-nums ${warn ? "text-amber-700 dark:text-amber-300" : ""}`}>{value}</div>
     </div>
   );
-  const jobsWaiting = (s.jobs["QUEUED"] ?? 0) + (s.jobs["RUNNING"] ?? 0);
+  const jobsWaiting = (s.jobs["QUEUED"] ?? 0) + (s.jobs["RUNNING"] ?? 0) + (s.jobs["WAITING_BUDGET"] ?? 0);
   return (
     <div className="mb-4 space-y-3">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -161,7 +164,7 @@ function StatsHeader({ s }: { s: Stats }) {
             {Object.keys(s.jobs).length === 0 && <div className="text-slate-500">None</div>}
             {Object.entries(s.jobs).map(([k, v]) => (
               <div key={k} className="flex justify-between">
-                <span>{k.charAt(0) + k.slice(1).toLowerCase()}</span>
+                <span>{jobStatusLabel(k)}</span>
                 <span className="tabular-nums">{v}</span>
               </div>
             ))}

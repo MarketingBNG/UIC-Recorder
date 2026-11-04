@@ -60,6 +60,9 @@ export const STATUS_LABEL: Record<CallStatus, string> = {
   FAILED: "Failed",
 };
 
+export const JOB_STATUS_LABEL: Record<string, string> = { WAITING_BUDGET: "Waiting for budget" };
+export const jobStatusLabel = (k: string) => JOB_STATUS_LABEL[k] ?? k.charAt(0) + k.slice(1).toLowerCase();
+
 export interface Segment {
   startMs: number | null;
   speaker: string | null;

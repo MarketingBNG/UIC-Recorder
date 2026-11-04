@@ -70,6 +70,42 @@ export interface Stats {
   jobs: Record<string, number>;
   disk: { freeBytes: number; totalBytes: number; usedPct: number };
   staleDevices: number;
+  fireflies?: FirefliesAlert;
+}
+export interface FirefliesAlert {
+  month: string;
+  pct: number;
+  thresholds: number[];
+  blocked: boolean;
+  lastError: string | null;
+  backlogGateReached: boolean;
+  waitingBudgetJobs: number;
+}
+export interface FirefliesUsage {
+  month: string;
+  enabled: boolean;
+  budgetMinutes: number;
+  liveReservePct: number;
+  usedMinutes: number;
+  reservedMinutes: number;
+  pct: number;
+  thresholds: number[];
+  approvedBacklogCount: number;
+  backlogSent: number;
+  deleteAfterFetch: boolean;
+  blocked: boolean;
+  blockedUntil: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  waitingBudgetJobs: number;
+}
+export interface FirefliesSettingsPatch {
+  enabled?: boolean;
+  budgetMinutes?: number;
+  liveReservePct?: number;
+  approvedBacklogCount?: number;
+  deleteAfterFetch?: boolean;
+  clearBlock?: boolean;
 }
 export interface DeviceConfig {
   recorderFolders: string[];

@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.usaindiacfo.uicrecorder.appContainer
 import com.usaindiacfo.uicrecorder.data.api.DeviceDto
+import com.usaindiacfo.uicrecorder.data.api.FirefliesPatch
 import com.usaindiacfo.uicrecorder.data.api.Stats
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -66,6 +67,8 @@ fun DevicesScreen() {
     var reload by remember { mutableIntStateOf(0) }
     var confirm by remember { mutableStateOf<DeviceDto?>(null) }
     var now by remember { mutableStateOf(Instant.now()) }
+    val ff = remember { FirefliesPanelState() }
+    val ffSave: (FirefliesPatch, String) -> Unit = { patch, done -> ff.save(scope, api, patch, done) { snackbar.showSnackbar(it) } }
 
     LaunchedEffect(reload) {
         refreshing = true
@@ -73,6 +76,7 @@ fun DevicesScreen() {
         // Stats failing (e.g. disk probe) shouldn't hide the device list.
         val (d, s) = coroutineScope {
             val s = async { apiCall { api.stats() } }
+            launch { ff.load(api) }
             apiCall { api.devices() } to s.await()
         }
         s.onSuccess { stats = it }
@@ -96,6 +100,7 @@ fun DevicesScreen() {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     stats?.let { s -> item(key = "stats") { StatsHeader(s) } }
+                    item(key = "fireflies") { FirefliesPanel(isAdmin, ff, ffSave) }
                     if (sorted.isEmpty()) item(key = "empty") { Text("No devices have signed in yet.") }
                     items(sorted, key = { it.id }) { d ->
                         DeviceRow(d, now, onRevoke = if (isAdmin && d.revokedAt == null) ({ confirm = d }) else null)
@@ -105,6 +110,7 @@ fun DevicesScreen() {
         }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter))
     }
+    FirefliesClearDialog(ff, ffSave)
 
     confirm?.let { d ->
         var busy by remember(d.id) { mutableStateOf(false) }
@@ -136,7 +142,7 @@ private fun StatsHeader(s: Stats) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Server health", style = MaterialTheme.typography.titleSmall)
             if (s.calls.isNotEmpty()) StatLine("Calls", s.calls)
-            if (s.jobs.isNotEmpty()) StatLine("Queue", s.jobs)
+            if (s.jobs.isNotEmpty()) StatLine("Queue", s.jobs, ::jobStatusLabel)
             val diskColor = if (s.disk.usedPct >= 90) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             Text(
                 "Disk ${s.disk.usedPct}% used · ${formatBytes(s.disk.freeBytes)} free of ${formatBytes(s.disk.totalBytes)}",
@@ -158,11 +164,11 @@ private fun StatsHeader(s: Stats) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatLine(label: String, counts: Map<String, Int>) {
+private fun StatLine(label: String, counts: Map<String, Int>, name: (String) -> String = { it.lowercase().replace('_', ' ') }) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("$label:", style = MaterialTheme.typography.labelMedium)
         counts.entries.sortedBy { it.key }.forEach { (k, v) ->
-            Text("${k.lowercase().replace('_', ' ')} $v", style = MaterialTheme.typography.bodySmall)
+            Text("${name(k)} $v", style = MaterialTheme.typography.bodySmall)
         }
     }
 }

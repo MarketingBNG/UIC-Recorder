@@ -3,6 +3,7 @@ package com.usaindiacfo.uicrecorder.data.api
 import android.content.ContentResolver
 import android.net.Uri
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -181,6 +182,11 @@ class ApiClient(
     }
 
     suspend fun stats(): Stats = get("/api/stats")
+
+    suspend fun firefliesUsage(): FirefliesUsage = get("/api/fireflies/usage")
+
+    suspend fun putFireflies(patch: FirefliesPatch): FirefliesUsage =
+        json.decodeFromString(send(jsonRequest("/api/settings/fireflies", "PUT", json.encodeToString(patch))))
 
     // ---- Plumbing ---------------------------------------------------------
 

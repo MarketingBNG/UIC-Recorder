@@ -33,6 +33,7 @@ import androidx.navigation.navArgument
 import com.usaindiacfo.uicrecorder.AppContainer
 import com.usaindiacfo.uicrecorder.data.api.UserDto
 import com.usaindiacfo.uicrecorder.ui.admin.DevicesScreen
+import com.usaindiacfo.uicrecorder.ui.admin.FirefliesBanner
 import com.usaindiacfo.uicrecorder.ui.admin.ServerSettingsScreen
 import com.usaindiacfo.uicrecorder.ui.admin.UsersScreen
 import com.usaindiacfo.uicrecorder.ui.calls.CallDetailScreen
@@ -140,6 +141,7 @@ private fun AdminTabs(user: UserDto?, route: String?, nav: NavHostController, co
                 Tab(selected = r == route, onClick = { if (r != route) nav.navigateTab(r) }, text = { Text(label) })
             }
         }
+        FirefliesBanner(route, user?.id, fetch = route != Routes.ADMIN_DEVICES) // Devices fetches with its panel
         content()
     }
 }

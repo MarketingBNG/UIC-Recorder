@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router";
 import { ApiError, api, isManager, type Me } from "./api";
+import { FirefliesBanner } from "./components/Fireflies";
 import { CallDetailPage } from "./pages/CallDetail";
 import { CallsPage } from "./pages/Calls";
 import { HealthPage } from "./pages/Health";
@@ -136,6 +137,7 @@ function Shell({ me }: { me: Me }) {
         )}
       </header>
       <main id="main" className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        {isManager(me.role) && <FirefliesBanner />}
         <Routes>
           <Route path="/" element={<Navigate to="/calls" replace />} />
           <Route path="/calls" element={<CallsPage />} />

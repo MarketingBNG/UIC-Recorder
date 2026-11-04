@@ -206,6 +206,55 @@ data class Stats(
     val jobs: Map<String, Int> = emptyMap(),
     val disk: DiskUsage,
     val staleDevices: Int,
+    /** Absent on servers older than the Fireflies provider. */
+    val fireflies: FirefliesStats? = null,
+)
+
+// ---- Fireflies (/api/fireflies/usage, PUT /api/settings/fireflies) ----------
+
+/** Banner subset that GET /api/stats carries. */
+@Serializable
+data class FirefliesStats(
+    val month: String,
+    val pct: Double,
+    val thresholds: List<Int> = emptyList(),
+    val blocked: Boolean = false,
+    val lastError: String? = null,
+    val backlogGateReached: Boolean = false,
+    val waitingBudgetJobs: Int = 0,
+)
+
+@Serializable
+data class FirefliesUsage(
+    val month: String,
+    val enabled: Boolean,
+    val budgetMinutes: Int,
+    val liveReservePct: Double,
+    val usedMinutes: Int,
+    val reservedMinutes: Int,
+    val pct: Double,
+    val thresholds: List<Int> = emptyList(),
+    val approvedBacklogCount: Int,
+    val backlogSent: Int,
+    val deleteAfterFetch: Boolean,
+    val blocked: Boolean = false,
+    val blockedUntil: String? = null,
+    val lastError: String? = null,
+    val lastErrorAt: String? = null,
+    val waitingBudgetJobs: Int = 0,
+) {
+    val backlogGateReached get() = backlogSent >= approvedBacklogCount
+}
+
+/** Null fields are not sent; the server applies only what is present. */
+@Serializable
+data class FirefliesPatch(
+    val enabled: Boolean? = null,
+    val budgetMinutes: Int? = null,
+    val liveReservePct: Double? = null,
+    val approvedBacklogCount: Int? = null,
+    val deleteAfterFetch: Boolean? = null,
+    val clearBlock: Boolean? = null,
 )
 
 @Serializable data class ErrorBody(val error: String? = null)
