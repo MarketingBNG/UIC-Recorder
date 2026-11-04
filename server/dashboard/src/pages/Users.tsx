@@ -193,7 +193,7 @@ function EditUserDialog({ user, isSelf, onClose }: { user: User; isSelf: boolean
       api<User>(`/api/users/${user.id}`, {
         method: "PATCH",
         body: {
-          ...(name.trim() ? { name: name.trim() } : {}),
+          name: name.trim() || null,
           team: team.trim() || null,
           role,
           active,
@@ -202,6 +202,7 @@ function EditUserDialog({ user, isSelf, onClose }: { user: User; isSelf: boolean
       }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["users"] });
+      void qc.invalidateQueries({ queryKey: ["me"] });
       onClose();
     },
   });

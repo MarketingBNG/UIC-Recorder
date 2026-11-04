@@ -24,7 +24,7 @@ const UserBody = z.object({
   team: z.string().max(100).optional(),
 });
 const UserPatch = z.object({
-  name: z.string().max(200).optional(),
+  name: z.string().max(200).nullable().optional(),
   role: z.enum(["ADMIN", "MANAGER", "AGENT"]).optional(),
   team: z.string().max(100).nullable().optional(),
   active: z.boolean().optional(),

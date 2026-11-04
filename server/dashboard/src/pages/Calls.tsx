@@ -50,9 +50,12 @@ export function CallsPage() {
   useEffect(() => set("q", dq), [dq]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => set("phone", dphone), [dphone]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Like the Android app: a number-like search (3+ chars) searches by phone, not transcript.
+  const search = get("q").trim();
+  const isPhone = search.length >= 3 && /^[+\d][\d\s()\-]*$/.test(search);
   const filters = {
-    q: get("q"),
-    phone: get("phone"),
+    q: isPhone ? "" : search,
+    phone: isPhone ? search.replace(/[^\d+]/g, "") : get("phone"),
     userId: manager ? get("userId") : "",
     direction: get("direction"),
     status: get("status"),
@@ -81,14 +84,14 @@ export function CallsPage() {
 
   return (
     <>
-      <PageHeader title="Calls" subtitle={manager ? (me.role === "ADMIN" ? "All recorded calls" : `Calls from ${me.team ?? "your"} team`) : "Your recorded calls"} />
+      <PageHeader title="Calls" subtitle={me.role === "ADMIN" ? "All recorded calls" : me.role === "MANAGER" && me.team ? `Calls from team ${me.team}` : "Your recorded calls"} />
 
       <div className="card mb-4 p-3 sm:p-4">
         <div className="flex gap-2">
           <label className="sr-only" htmlFor="q">
-            Search transcripts
+            Search transcripts or phone
           </label>
-          <input id="q" type="search" className="input" placeholder="Search transcripts" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input id="q" type="search" className="input" placeholder="Search transcripts or phone" value={q} onChange={(e) => setQ(e.target.value)} />
           <button type="button" className="btn-outline shrink-0" aria-expanded={showFilters} aria-controls="filters" onClick={() => setShowFilters((s) => !s)}>
             Filters{activeCount ? ` (${activeCount})` : ""}
           </button>

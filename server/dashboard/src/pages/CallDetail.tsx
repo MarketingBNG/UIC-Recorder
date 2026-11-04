@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, isManager, type CallDetail } from "../api";
+import { api, ApiError, isManager, type CallDetail } from "../api";
 import { useMe } from "../App";
 import { formatBytes, formatDuration, formatWhen, parseSegments, personName } from "../format";
 import { ConfirmDialog, DirectionTag, ErrorBox, Spinner, StatusBadge } from "../ui";
@@ -13,7 +13,8 @@ export function CallDetailPage() {
   const me = useMe();
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const call = useQuery({ queryKey: ["call", id], queryFn: () => api<CallDetail>(`/api/calls/${id}`) });
+  const validId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+  const call = useQuery({ queryKey: ["call", id], queryFn: () => api<CallDetail>(`/api/calls/${id}`), enabled: validId });
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const [posMs, setPosMs] = useState(0);
@@ -59,6 +60,14 @@ export function CallDetailPage() {
     }
   };
 
+  const notFound = !validId || (call.error instanceof ApiError && [400, 403, 404].includes(call.error.status));
+  if (notFound)
+    return (
+      <>
+        <BackLink />
+        <p className="card p-4 text-sm">This call doesn't exist, was deleted, or isn't visible to you.</p>
+      </>
+    );
   if (call.isPending) return <Spinner label="Loading call" />;
   if (call.isError)
     return (

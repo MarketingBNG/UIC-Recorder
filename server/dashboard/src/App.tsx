@@ -59,10 +59,12 @@ function Shell({ me }: { me: Me }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const logout = useMutation({
     mutationFn: () => api<void>("/auth/logout", { method: "POST" }),
-    onSettled: () => {
+    // Only drop the local session once the server has cleared the cookie.
+    onSuccess: () => {
       qc.clear();
       qc.setQueryData(["me"], null);
     },
+    onError: (e) => alert(`Sign out failed: ${e.message}`),
   });
   const items = navItems(me);
   const linkCls = ({ isActive }: { isActive: boolean }) =>
