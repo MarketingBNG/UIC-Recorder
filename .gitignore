@@ -1,2 +1,38 @@
-server-dev.log
+# Secrets: never commit (use .env.example for the shape)
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+client_secret*.json
+
+# Logs
+*.log
+
+# Local data (dev database, uploaded recordings, imports)
+.pgdata/
+data/
+recordings/
+
+# Build output & dependencies
+node_modules/
+dist/
+build/
+.gradle/
+.kotlin/
+__pycache__/
+.venv/
+.pytest_cache/
+*.apk
+*.aab
+
+# Editors & OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
