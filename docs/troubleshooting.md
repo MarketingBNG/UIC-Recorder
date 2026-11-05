@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Worker translate claim failed with 400 Bad Request
+- **Cause:** the worker asked for up to 100 translate jobs per claim; the API allows at most 20.
+- **Fix:** the worker caps each claim at 20 (`CLAIM_MAX` in `worker/worker/translator.py`); a batch of 100 fills over several claims.
+
+## Worker crashed on deploy: "No module named 'anthropic'"
+- **Cause:** Railpack installs from `worker/requirements.txt`, which wasn't regenerated after adding a package to `pyproject.toml`.
+- **Fix:** after changing worker dependencies run `uv export --no-dev --no-hashes --format requirements-txt -o requirements.txt` and commit it.
+
 ## Whisper crashed: "open() got an unexpected keyword argument 'metadata_errors'"
 - **Cause:** PyAV 19 removed an option that faster-whisper 1.2.1 still passes.
 - **Fix:** pinned `av==17.0.1` next to faster-whisper in `worker/pyproject.toml`.
