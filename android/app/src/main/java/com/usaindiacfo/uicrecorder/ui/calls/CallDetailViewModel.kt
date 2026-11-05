@@ -18,8 +18,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
 import java.io.IOException
 
-/** startMs is null when the provider gave no timing. */
-data class Segment(val startMs: Long?, val speaker: String?, val text: String)
+/** startMs is null when the provider gave no timing; en is the English line once translated. */
+data class Segment(val startMs: Long?, val speaker: String?, val text: String, val en: String? = null) {
+    fun textIn(english: Boolean): String = if (english) en ?: text else text
+}
+
+enum class TranscriptLanguage { ENGLISH, ORIGINAL }
 
 data class CallDetailState(
     val loading: Boolean = true,
@@ -28,7 +32,22 @@ data class CallDetailState(
     val error: String? = null,
     val deleting: Boolean = false,
     val deleted: Boolean = false,
-)
+    /** null until the user picks; then the default follows whether an English version exists. */
+    val chosenLanguage: TranscriptLanguage? = null,
+) {
+    val hasEnglish: Boolean get() = !call?.transcript?.textEn.isNullOrBlank()
+    val translationPending: Boolean get() = call?.translationPending == true || call?.transcript?.translationPending == true
+    val language: TranscriptLanguage
+        get() = if (!hasEnglish) TranscriptLanguage.ORIGINAL else chosenLanguage ?: TranscriptLanguage.ENGLISH
+    val showsEnglish: Boolean get() = language == TranscriptLanguage.ENGLISH
+
+    /** Whole transcript in the selected language, used for the plain view, copy and share. */
+    val transcriptText: String?
+        get() {
+            val t = call?.transcript ?: return null
+            return if (showsEnglish) t.textEn else t.text
+        }
+}
 
 class CallDetailViewModel(private val c: AppContainer, private val id: String) : ViewModel() {
     val user = c.authRepository.currentUser
@@ -49,6 +68,8 @@ class CallDetailViewModel(private val c: AppContainer, private val id: String) :
             _state.update { it.copy(loading = false, error = e.message ?: "Could not load call") }
         }
     }
+
+    fun selectLanguage(lang: TranscriptLanguage) = _state.update { it.copy(chosenLanguage = lang) }
 
     fun delete() = viewModelScope.launch {
         _state.update { it.copy(deleting = true, error = null) }
@@ -73,6 +94,6 @@ internal fun parseSegments(json: JsonElement?): List<Segment> {
         val text = str("text")?.trim()?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
         val ms = (num("startMs") ?: num("start_ms"))?.toLong()
             ?: (num("start") ?: num("from"))?.let { (it * 1000).toLong() }
-        Segment(ms, str("speaker") ?: (o["speaker"] as? JsonPrimitive)?.content, text)
+        Segment(ms, str("speaker") ?: (o["speaker"] as? JsonPrimitive)?.content, text, str("en")?.trim()?.takeIf { it.isNotEmpty() })
     }
 }

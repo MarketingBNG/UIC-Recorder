@@ -3,10 +3,15 @@ import type { Db } from "../db.js";
 export const MAX_ATTEMPTS = 5;
 export const STALE_LOCK_MINUTES = 10;
 
+export const JOB_KINDS = ["transcribe", "translate"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
+
 export interface ClaimedJob {
   id: string;
   callId: string;
   attempts: number;
+  kind: string;
+  priority: number;
 }
 
 /**
@@ -14,7 +19,12 @@ export interface ClaimedJob {
  * Jobs whose worker died (no heartbeat for STALE_LOCK_MINUTES) are reclaimed,
  * unless they've used up their attempts, in which case they're failed.
  */
-export async function claimJobs(db: Db, workerId: string, limit: number): Promise<ClaimedJob[]> {
+export async function claimJobs(
+  db: Db,
+  workerId: string,
+  limit: number,
+  kinds: readonly string[] = ["transcribe"],
+): Promise<ClaimedJob[]> {
   await failExhaustedStaleJobs(db);
   return db.$queryRaw<ClaimedJob[]>`
     UPDATE "jobs" SET
@@ -25,14 +35,15 @@ export async function claimJobs(db: Db, workerId: string, limit: number): Promis
       "updated_at" = now()
     WHERE "id" IN (
       SELECT "id" FROM "jobs"
-      WHERE ("status" IN ('QUEUED', 'WAITING_BUDGET') AND "run_after" <= now())
-         OR ("status" = 'RUNNING' AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES})
-             AND "attempts" < ${MAX_ATTEMPTS})
+      WHERE "kind" = ANY(${[...kinds]}::text[])
+        AND (("status" IN ('QUEUED', 'WAITING_BUDGET') AND "run_after" <= now())
+          OR ("status" = 'RUNNING' AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES})
+              AND "attempts" < ${MAX_ATTEMPTS}))
       ORDER BY "priority" DESC, "created_at" ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING "id", "call_id" AS "callId", "attempts"`;
+    RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority"`;
 }
 
 /** Stale jobs that already hit MAX_ATTEMPTS (e.g. a file that crashes the worker) stop here. */
@@ -44,9 +55,11 @@ async function failExhaustedStaleJobs(db: Db): Promise<void> {
       WHERE "status" = 'RUNNING'
         AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES})
         AND "attempts" >= ${MAX_ATTEMPTS}
-      RETURNING "call_id"
+      RETURNING "call_id", "kind"
     )
-    UPDATE "calls" SET "status" = 'FAILED', "updated_at" = now() WHERE "id" IN (SELECT "call_id" FROM dead)`;
+    -- A failed translation leaves the call TRANSCRIBED.
+    UPDATE "calls" SET "status" = 'FAILED', "updated_at" = now()
+    WHERE "id" IN (SELECT "call_id" FROM dead WHERE "kind" <> 'translate')`;
 }
 
 /** Keeps a long-running job's lock fresh. Returns false if the lock was lost. */
@@ -65,22 +78,82 @@ export interface TranscriptResult {
   segments?: unknown;
 }
 
-/** Stores a transcript for a job this worker holds. Returns false if the lock was lost. */
-export async function completeJob(db: Db, jobId: string, workerId: string, result: TranscriptResult) {
+/**
+ * Stores a transcript for a transcribe job this worker holds. Returns false if the
+ * lock was lost. With `translate`, also queues an English translation job.
+ */
+export async function completeJob(
+  db: Db,
+  jobId: string,
+  workerId: string,
+  result: TranscriptResult,
+  opts: { translate?: boolean } = {},
+) {
   return db.$transaction(async (tx) => {
-    const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId } });
+    const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "transcribe" } });
     if (!job) return false;
     const data = {
       text: result.text,
       language: result.language ?? null,
       provider: result.provider,
       segments: (result.segments ?? undefined) as object | undefined,
+      // A re-transcription invalidates any earlier English version.
+      textEn: null,
+      translationModel: null,
     };
     await tx.transcript.upsert({ where: { callId: job.callId }, create: { callId: job.callId, ...data }, update: data });
     await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null } });
     await tx.call.update({ where: { id: job.callId }, data: { status: "TRANSCRIBED" } });
+    // A running translate job already read the old transcript: take it out of play so
+    // its later result is rejected (lock lost) instead of overwriting the new segments.
+    await tx.job.updateMany({
+      where: { callId: job.callId, kind: "translate", status: "RUNNING" },
+      data: { status: "FAILED", lockedBy: null, lockedAt: null, lastError: "superseded by re-transcription" },
+    });
+    if (opts.translate) {
+      // A queued one is fine: it reads the new transcript when claimed.
+      const open = await tx.job.findFirst({
+        where: { callId: job.callId, kind: "translate", status: "QUEUED" },
+        select: { id: true },
+      });
+      if (!open) await tx.job.create({ data: { callId: job.callId, kind: "translate", priority: job.priority } });
+    }
     return true;
   });
+}
+
+export interface TranslationResult {
+  model: string;
+  textEn: string;
+  segments: Record<string, unknown>[];
+}
+
+/** Stores the English version for a translate job this worker holds. Returns false if the lock was lost. */
+export async function completeTranslation(db: Db, jobId: string, workerId: string, result: TranslationResult) {
+  return db.$transaction(async (tx) => {
+    const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "translate" } });
+    if (!job) return false;
+    const { count } = await tx.transcript.updateMany({
+      where: { callId: job.callId },
+      data: { textEn: result.textEn, translationModel: result.model, segments: result.segments as object[] },
+    });
+    if (count !== 1) return false;
+    await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null } });
+    return true;
+  });
+}
+
+/** Queues a translate job (priority 0) for every untranslated transcript without an open one. */
+export async function queueTranslationBackfill(db: Db): Promise<number> {
+  return db.$executeRaw`
+    INSERT INTO "jobs" ("id", "call_id", "kind", "priority", "status", "attempts", "run_after", "created_at", "updated_at")
+    SELECT gen_random_uuid(), t."call_id", 'translate', 0, 'QUEUED', 0, now(), now(), now()
+    FROM "transcripts" t
+    WHERE t."text_en" IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "jobs" j
+        WHERE j."call_id" = t."call_id" AND j."kind" = 'translate' AND j."status" IN ('QUEUED', 'RUNNING')
+      )`;
 }
 
 /** Records a failure; retries with exponential backoff until MAX_ATTEMPTS. */
@@ -100,7 +173,10 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
         runAfter: giveUp ? job.runAfter : new Date(Date.now() + backoffMs),
       },
     });
-    await tx.call.update({ where: { id: job.callId }, data: { status: giveUp ? "FAILED" : "UPLOADED" } });
+    // A translate job never changes the call: it stays TRANSCRIBED.
+    if (job.kind !== "translate") {
+      await tx.call.update({ where: { id: job.callId }, data: { status: giveUp ? "FAILED" : "UPLOADED" } });
+    }
     return true;
   });
 }

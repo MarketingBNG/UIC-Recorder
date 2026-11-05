@@ -76,3 +76,11 @@ Fireflies downloads the audio from our server, so `uic-api` must be reachable ov
 4. **Hard stop.** Some Fireflies errors mean the plan, payment or quota is the problem: `paid_required`, `account_cancelled`, `require_ai_credits`, `feature_disabled`, or a message mentioning a quota or an exceeded limit. When one arrives, all Fireflies sends stop until the next month or until an admin sends `clearBlock`. `/api/stats` shows it as `fireflies.blocked` and `fireflies.lastError`.
 5. **Unsupported formats.** Fireflies only accepts mp3, mp4, m4a, wav and ogg. Calls recorded as amr, 3gp, raw aac, opus or webm fail with `UNSUPPORTED_FORMAT` and aren't retried. To transcribe them, run a worker with another provider (`openai` or `faster_whisper`) and re-queue those jobs.
 6. **Switching provider.** Change `TRANSCRIBE_PROVIDER` on `uic-worker` and redeploy. All workers share one queue, so you can also run two workers with different providers at the same time.
+
+## English translation
+Every new transcript also gets an English version, made by Claude Opus 5.5 on the worker.
+
+1. On `uic-api`, `TRANSLATE_ENABLED` (default `true`) queues a `translate` job after each transcript, with the same priority as the transcription (live calls first). Set it to `false` to stop queueing new translations; existing jobs stay in the queue.
+2. On `uic-worker`, set `ANTHROPIC_API_KEY`. Without it the worker doesn't take translate jobs and they wait in the queue. Optional settings are in `worker/.env.example`.
+3. To translate transcripts made before this feature, an admin sends `POST /api/admin/translate-backfill` (the dashboard settings page has a button for it). It queues one job per untranslated transcript and returns `{ "queued": n }`. These run as low-priority batches.
+4. A failed translation doesn't change the call: it stays `TRANSCRIBED` and shows the original transcript.

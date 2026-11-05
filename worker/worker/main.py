@@ -49,8 +49,9 @@ class Api:
         )
 
     @_network_retry
-    def claim(self, limit: int) -> list[dict]:
-        res = self.http.post("/internal/jobs/claim", json={"workerId": self.worker_id, "limit": limit})
+    def claim(self, limit: int, kinds: tuple[str, ...] = ("transcribe",)) -> list[dict]:
+        res = self.http.post("/internal/jobs/claim",
+                             json={"workerId": self.worker_id, "limit": limit, "kinds": list(kinds)})
         res.raise_for_status()
         return res.json()["jobs"]
 
@@ -75,6 +76,22 @@ class Api:
         res = self.http.post(f"/internal/jobs/{job_id}/result", json={"workerId": self.worker_id, **payload})
         if res.status_code == 409:
             log.warning("lost job lock; result discarded", job_id=job_id)
+            return
+        res.raise_for_status()
+
+    # ---- Translation ----
+
+    @_network_retry
+    def get_transcript(self, call_id: str) -> dict:
+        res = self.http.get(f"/internal/transcripts/{call_id}")
+        res.raise_for_status()
+        return res.json()
+
+    @_network_retry
+    def post_translation(self, job_id: str, payload: dict) -> None:
+        res = self.http.post(f"/internal/jobs/{job_id}/translation", json={"workerId": self.worker_id, **payload})
+        if res.status_code == 409:
+            log.warning("lost job lock; translation discarded", job_id=job_id)
             return
         res.raise_for_status()
 
@@ -182,7 +199,12 @@ def run(settings: Settings) -> None:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     log.info("worker started", worker_id=settings.worker_id, provider=provider.name, api=settings.api_url,
-             concurrency=settings.concurrency)
+             concurrency=settings.concurrency, translate=bool(settings.anthropic_api_key))
+    translator = None
+    if settings.anthropic_api_key:
+        from .translator import Translator
+
+        translator = Translator.start(api, settings, lambda: stopping)
 
     # Up to `concurrency` jobs run at once; we only claim as many as we have free slots,
     # so other workers can take the rest of the queue.
@@ -208,6 +230,8 @@ def run(settings: Settings) -> None:
             elif not jobs:
                 time.sleep(idle)
                 idle = min(idle * 2, settings.idle_max_sleep)
+    if translator:
+        translator.join()
 
 
 def _safe_process(api: Api, provider: Provider, job: dict, language: str | None) -> None:

@@ -33,6 +33,12 @@ const schema = z.object({
   IMPORT_TOKEN: z.string().min(32).optional().or(z.literal("").transform(() => undefined)),
 
   DEFAULT_PHONE_REGION: z.string().length(2).default("IN"),
+
+  // Queue an English translation job after every transcript (worker needs ANTHROPIC_API_KEY to run them).
+  TRANSLATE_ENABLED: z
+    .enum(["true", "false", "1", "0", ""])
+    .default("true")
+    .transform((v) => v !== "false" && v !== "0"),
 });
 
 export type Config = z.infer<typeof schema>;

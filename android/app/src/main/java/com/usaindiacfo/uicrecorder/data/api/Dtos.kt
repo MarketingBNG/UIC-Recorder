@@ -119,9 +119,20 @@ data class CallFilter(
     val to: String? = null,
 )
 
-/** segments is provider-specific JSON (e.g. [{start,end,text}]); null when absent. */
+/**
+ * segments is provider-specific JSON (e.g. [{start,end,text}]); null when absent. After translation each
+ * segment also carries "en". textEn/translationModel are null until the English version exists.
+ */
 @Serializable
-data class Transcript(val text: String, val language: String? = null, val provider: String, val segments: JsonElement? = null)
+data class Transcript(
+    val text: String,
+    val language: String? = null,
+    val provider: String,
+    val segments: JsonElement? = null,
+    val textEn: String? = null,
+    val translationModel: String? = null,
+    val translationPending: Boolean = false,
+)
 
 @Serializable
 data class CallDetail(
@@ -143,6 +154,8 @@ data class CallDetail(
     val createdAt: String,
     val user: UserRef,
     val transcript: Transcript? = null,
+    /** Some server builds report this next to the transcript instead of inside it; either counts. */
+    val translationPending: Boolean = false,
 )
 
 @Serializable data class CallCount(val calls: Int = 0)
@@ -258,3 +271,6 @@ data class FirefliesPatch(
 )
 
 @Serializable data class ErrorBody(val error: String? = null)
+
+/** POST /api/admin/translate-backfill response. */
+@Serializable data class TranslateBackfill(val queued: Int = 0)

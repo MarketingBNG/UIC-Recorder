@@ -67,6 +67,8 @@ export interface Segment {
   startMs: number | null;
   speaker: string | null;
   text: string;
+  /** English translation of `text`, when the transcript has been translated. */
+  en: string | null;
 }
 
 /** Provider-specific segments; same rules as the Android app's parseSegments(). */
@@ -93,7 +95,9 @@ export function parseSegments(json: unknown): Segment[] {
     const startMs = ms != null ? Math.trunc(ms) : sec != null ? Math.trunc(sec * 1000) : null;
     const sp = o["speaker"];
     const speaker = typeof sp === "string" ? sp : typeof sp === "number" || typeof sp === "boolean" ? String(sp) : null;
-    out.push({ startMs, speaker, text });
+    const rawEn = o["en"];
+    const en = typeof rawEn === "string" && rawEn.trim() ? rawEn.trim() : null;
+    out.push({ startMs, speaker, text, en });
   }
   return out;
 }

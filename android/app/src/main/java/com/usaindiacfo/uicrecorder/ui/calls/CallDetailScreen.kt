@@ -33,6 +33,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -92,7 +95,7 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
     LaunchedEffect(player, hasAudio) { if (hasAudio) player.load(vm.audioUrl) }
     LaunchedEffect(state.deleted) { if (state.deleted) onBack() }
 
-    val transcript = state.call?.transcript?.text
+    val transcript = state.transcriptText
     Scaffold(
         topBar = {
             TopAppBar(
@@ -129,11 +132,16 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
                             if (transcript != null) TextButton(onClick = { copyText(context, transcript) }) { Text("Copy") }
                         }
                     }
+                    if (state.hasEnglish) item(key = "lang") { LanguageToggle(state.language, vm::selectLanguage) }
+                    if (state.translationPending && !state.hasEnglish && call.transcript != null) item(key = "pending") {
+                        Text("English translation in progress", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
+                    }
                     when {
                         transcript == null -> item(key = "none") { Text("No transcript yet (${call.status.label().lowercase()})", style = MaterialTheme.typography.bodyMedium) }
                         state.segments.isEmpty() -> item(key = "text") { Text(transcript, style = MaterialTheme.typography.bodyMedium) }
                         else -> itemsIndexed(state.segments, key = { i, _ -> "s$i" }, contentType = { _, _ -> "seg" }) { _, s ->
-                            SegmentRow(s, active = s.startMs != null && ps.positionMs >= s.startMs) {
+                            SegmentRow(s, state.showsEnglish, active = s.startMs != null && ps.positionMs >= s.startMs) {
                                 if (hasAudio && s.startMs != null) player.playFrom(s.startMs)
                             }
                         }
@@ -206,7 +214,7 @@ private fun PlayerControls(ps: PlayerState, player: CallPlayer, fallbackDuration
 }
 
 @Composable
-private fun SegmentRow(s: Segment, active: Boolean, onClick: () -> Unit) {
+private fun SegmentRow(s: Segment, english: Boolean, active: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(enabled = s.startMs != null, onClick = onClick).padding(vertical = 6.dp)) {
         Text(
             s.startMs?.let { formatDuration((it / 1000).toInt()) } ?: "",
@@ -216,7 +224,22 @@ private fun SegmentRow(s: Segment, active: Boolean, onClick: () -> Unit) {
         )
         Column(Modifier.weight(1f)) {
             s.speaker?.let { Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold) }
-            Text(s.text, style = MaterialTheme.typography.bodyMedium)
+            Text(s.textIn(english), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+@Composable
+private fun LanguageToggle(selected: TranscriptLanguage, onSelect: (TranscriptLanguage) -> Unit) {
+    val options = listOf(TranscriptLanguage.ENGLISH to "English", TranscriptLanguage.ORIGINAL to "Original")
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+        options.forEachIndexed { i, (lang, label) ->
+            SegmentedButton(
+                selected = lang == selected,
+                onClick = { onSelect(lang) },
+                shape = SegmentedButtonDefaults.itemShape(i, options.size),
+                label = { Text(label) },
+            )
         }
     }
 }

@@ -14,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
@@ -203,12 +204,46 @@ private fun ConfigEditor(
             TextButton(onClick = onReset, enabled = dirty) { Text("Discard changes") }
         }
 
+        HorizontalDivider()
+        TranslateBackfillSection()
+
         latestApp?.let {
             HorizontalDivider()
             Text("Published app", style = MaterialTheme.typography.labelLarge)
             Text("${it.versionName} (${it.versionCode}) · ${it.fileName}", style = MaterialTheme.typography.bodySmall)
         }
     }
+}
+
+/** Queues English translations for transcripts made before translation existed. */
+@Composable
+private fun TranslateBackfillSection() {
+    val api = appContainer().apiClient
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    Text("English translations", style = MaterialTheme.typography.labelLarge)
+    Text("New calls get an English version automatically. This queues one for older transcripts that have none.",
+        style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(
+        onClick = {
+            busy = true; result = null
+            scope.launch {
+                apiCall { api.translateBackfill() }
+                    .onSuccess { result = backfillMessage(it.queued) }
+                    .onFailure { result = it.userMessage() }
+                busy = false
+            }
+        },
+        enabled = !busy,
+    ) { Text(if (busy) "Queuing…" else "Translate existing transcripts") }
+    result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+internal fun backfillMessage(queued: Int): String = when (queued) {
+    0 -> "Nothing to translate. Every transcript already has English or is queued."
+    1 -> "Queued 1 transcript for translation."
+    else -> "Queued $queued transcripts for translation."
 }
 
 @Composable

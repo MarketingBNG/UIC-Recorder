@@ -2,9 +2,24 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
-import { claimJobs, completeJob, failJob, heartbeatJob } from "../jobs/queue.js";
+import { JOB_KINDS, claimJobs, completeJob, completeTranslation, failJob, heartbeatJob } from "../jobs/queue.js";
 
-const Claim = z.object({ workerId: z.string().min(1).max(100), limit: z.number().int().min(1).max(20).default(1) });
+const Claim = z.object({
+  workerId: z.string().min(1).max(100),
+  limit: z.number().int().min(1).max(20).default(1),
+  // Old workers send no kinds and only get transcription jobs.
+  kinds: z.array(z.enum(JOB_KINDS)).min(1).max(JOB_KINDS.length).default(["transcribe"]),
+});
+
+const Translation = z.object({
+  workerId: z.string().min(1).max(100),
+  model: z.string().min(1).max(100),
+  textEn: z.string().max(4_000_000),
+  segments: z.array(z.record(z.string(), z.unknown())).max(100_000),
+  usage: z
+    .object({ inputTokens: z.number().int().min(0), outputTokens: z.number().int().min(0), batch: z.boolean() })
+    .optional(),
+});
 
 const Result = z.discriminatedUnion("ok", [
   z.object({
@@ -28,19 +43,25 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   const auth = { preHandler: requireWorker(deps), config: { rateLimit: false as const } };
 
   app.post("/internal/jobs/claim", auth, async (req) => {
-    const { workerId, limit } = Claim.parse(req.body);
-    const jobs = await claimJobs(deps.db, workerId, limit);
+    const { workerId, limit, kinds } = Claim.parse(req.body);
+    const jobs = await claimJobs(deps.db, workerId, limit, kinds);
     if (jobs.length === 0) return { jobs: [] };
     const calls = await deps.db.call.findMany({
       where: { id: { in: jobs.map((j) => j.callId) } },
       select: { id: true, mimeType: true, durationS: true, user: { select: { id: true } } },
     });
-    await deps.db.call.updateMany({ where: { id: { in: calls.map((c) => c.id) } }, data: { status: "TRANSCRIBING" } });
+    // Translation runs on an already TRANSCRIBED call; only transcription changes the call status.
+    const transcribing = jobs.filter((j) => j.kind === "transcribe").map((j) => j.callId);
+    if (transcribing.length > 0) {
+      await deps.db.call.updateMany({ where: { id: { in: transcribing } }, data: { status: "TRANSCRIBING" } });
+    }
     const byId = new Map(calls.map((c) => [c.id, c]));
     return {
       jobs: jobs.map((j) => ({
         jobId: j.id,
         callId: j.callId,
+        kind: j.kind,
+        priority: j.priority,
         attempt: j.attempts,
         mimeType: byId.get(j.callId)?.mimeType ?? null,
         durationS: byId.get(j.callId)?.durationS ?? null,
@@ -58,6 +79,16 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     return reply.send(deps.storage.read(call.filePath));
   });
 
+  app.get<{ Params: { callId: string } }>("/internal/transcripts/:callId", auth, async (req) => {
+    const callId = z.uuid().parse(req.params.callId);
+    const t = await deps.db.transcript.findUnique({
+      where: { callId },
+      select: { callId: true, text: true, language: true, segments: true },
+    });
+    if (!t) throw new HttpError(404, "No transcript");
+    return t;
+  });
+
   app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/heartbeat", auth, async (req, reply) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const { workerId } = z.object({ workerId: z.string().max(100) }).parse(req.body);
@@ -71,9 +102,19 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     const jobId = z.uuid().parse(req.params.jobId);
     const body = Result.parse(req.body);
     const ok = body.ok
-      ? await completeJob(deps.db, jobId, body.workerId, body)
+      ? await completeJob(deps.db, jobId, body.workerId, body, { translate: deps.config.TRANSLATE_ENABLED })
       : await failJob(deps.db, jobId, body.workerId, body.error, body.retryable);
     if (!ok) throw new HttpError(409, "Job is not locked by this worker");
+    return reply.code(204).send();
+  });
+
+  app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/translation", resultOpts, async (req, reply) => {
+    const jobId = z.uuid().parse(req.params.jobId);
+    const body = Translation.parse(req.body);
+    if (body.usage) req.log.info({ jobId, model: body.model, usage: body.usage }, "translation usage");
+    if (!(await completeTranslation(deps.db, jobId, body.workerId, body))) {
+      throw new HttpError(409, "Job is not a translate job locked by this worker");
+    }
     return reply.code(204).send();
   });
 }

@@ -29,10 +29,16 @@ class Settings:
     whisper_model: str
     whisper_device: str
     whisper_compute_type: str
+    whisper_task: str
     openai_api_key: str | None
     openai_model: str
     fireflies_api_key: str | None = None
     fireflies_max_wait_s: float = 3600
+    # English translation with Claude (off when no key)
+    anthropic_api_key: str | None = None
+    translate_model: str = "claude-opus-5-5"
+    translate_batch_max: int = 100
+    translate_batch_wait_s: float = 900
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -52,9 +58,16 @@ class Settings:
             whisper_model=e.get("WHISPER_MODEL", "large-v3-turbo"),
             whisper_device=e.get("WHISPER_DEVICE", "auto"),
             whisper_compute_type=e.get("WHISPER_COMPUTE_TYPE", "default"),
+            # "translate" = Whisper writes English directly (needs large-v3; turbo was not trained to translate).
+            whisper_task=e.get("WHISPER_TASK", "transcribe"),
             openai_api_key=e.get("OPENAI_API_KEY") or None,
             openai_model=e.get("OPENAI_TRANSCRIBE_MODEL", "whisper-1"),
             fireflies_api_key=e.get("FIREFLIES_API_KEY") or None,
             # Give up waiting for one Fireflies transcript after this long (job is retried later).
             fireflies_max_wait_s=float(e.get("FIREFLIES_MAX_WAIT_S", "3600")),
+            anthropic_api_key=e.get("ANTHROPIC_API_KEY") or None,
+            translate_model=e.get("TRANSLATE_MODEL") or "claude-opus-5-5",
+            # Backlog translations: one Message Batch per this many calls, or after this long.
+            translate_batch_max=max(1, int(e.get("TRANSLATE_BATCH_MAX", "100"))),
+            translate_batch_wait_s=float(e.get("TRANSLATE_BATCH_WAIT_S", "900")),
         )

@@ -159,8 +159,11 @@ model Transcript {
   text      String
   language  String?
   provider  String
-  segments  Json?
-  // Generated column: to_tsvector('simple', text). Created in migration SQL.
+  segments  Json? // after translation each segment also has "en"
+  // English version made by the worker's translate job; null until translated.
+  textEn           String? @map("text_en")
+  translationModel String? @map("translation_model")
+  // Generated column: to_tsvector('simple', text || ' ' || coalesce(text_en, '')). Created in migration SQL.
   tsv       Unsupported("tsvector")?
   createdAt DateTime                 @default(now()) @map("created_at")
   updatedAt DateTime                 @updatedAt @map("updated_at")

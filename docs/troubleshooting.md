@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Whisper crashed: "open() got an unexpected keyword argument 'metadata_errors'"
+- **Cause:** PyAV 19 removed an option that faster-whisper 1.2.1 still passes.
+- **Fix:** pinned `av==17.0.1` next to faster-whisper in `worker/pyproject.toml`.
+
+## Samsung phone not detected over USB ("USB debugging is disabled by Auto Blocker")
+- **Cause:** Samsung's Auto Blocker blocks USB debugging (and installs from outside the Play Store).
+- **Fix:** Settings > Security and privacy > Auto Blocker: off; then turn on USB debugging and tap Allow. Turn Auto Blocker back on after testing.
+
 ## Fireflies key not found in worker/.env
 - **Cause:** the key was pasted into `server/.env`, with a space before `=` (`FIREFLIES_API_KEY ="..."`).
 - **Fix:** the worker reads `worker/.env`; write `KEY="value"` with no spaces around `=`.

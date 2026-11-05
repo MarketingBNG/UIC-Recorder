@@ -35,7 +35,19 @@ export interface CallDetail extends Omit<CallItem, "transcript"> {
   filePath: string | null;
   mimeType: string | null;
   fileSize: string | null;
-  transcript: { text: string; language: string | null; provider: string | null; segments: unknown } | null;
+  transcript: {
+    text: string;
+    language: string | null;
+    provider: string | null;
+    /** Provider segments; after translation each object also carries `en`. */
+    segments: unknown;
+    textEn?: string | null;
+    translationModel?: string | null;
+    translationPending?: boolean;
+  } | null;
+}
+export interface TranslateBackfillResult {
+  queued: number;
 }
 export interface User {
   id: string;

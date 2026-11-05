@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "UIC Recorder transcription worker: claims jobs from the API and posts transcripts back."
 requires-python = ">=3.13,<3.14"
 dependencies = [
+  "anthropic==2.5.0",
   "httpx==0.28.1",
   "structlog==26.1.0",
   "tenacity==9.2.1",
@@ -11,7 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Self-hosted Whisper (CPU or GPU). Includes Silero VAD via vad_filter.
-local = ["faster-whisper==1.2.1"]
+local = ["faster-whisper==1.2.1", "av==17.0.1"]  # av 19 dropped open(metadata_errors=) that faster-whisper uses
 
 [dependency-groups]
 dev = ["pytest==9.2.0", "respx==0.23.1"]

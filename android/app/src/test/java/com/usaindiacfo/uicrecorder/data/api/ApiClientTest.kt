@@ -98,4 +98,34 @@ class ApiClientTest {
         assertEquals(listOf(50, 80), f.thresholds)
         assertEquals(true, f.backlogGateReached)
     }
+
+    @Test fun callDetailParsesEnglishTranslation() = runBlocking {
+        server.enqueue(json(200, """{"id":"c","userId":"u","direction":"INCOMING","source":"LIVE",
+            "startedAt":"2026-11-01T10:00:00Z","status":"TRANSCRIBED","createdAt":"2026-11-01T10:00:00Z",
+            "user":{"id":"u","email":"a@usaindiacfo.com","name":null},
+            "transcript":{"text":"namaste","language":"hi","provider":"fireflies","segments":[{"start":0,"text":"namaste","en":"hello"}],
+            "textEn":"hello","translationModel":"claude-opus-5-5","translationPending":false}}"""))
+        val t = api.call("c").transcript!!
+        assertEquals("hello", t.textEn)
+        assertEquals("claude-opus-5-5", t.translationModel)
+        assertEquals(false, t.translationPending)
+    }
+
+    @Test fun oldTranscriptWithoutTranslationFieldsStillParses() = runBlocking {
+        server.enqueue(json(200, """{"id":"c","userId":"u","direction":"INCOMING","source":"LIVE",
+            "startedAt":"2026-11-01T10:00:00Z","status":"TRANSCRIBED","createdAt":"2026-11-01T10:00:00Z",
+            "user":{"id":"u","email":"a@usaindiacfo.com","name":null},
+            "transcript":{"text":"namaste","provider":"fireflies"}}"""))
+        val t = api.call("c").transcript!!
+        assertNull(t.textEn)
+        assertEquals(false, t.translationPending)
+    }
+
+    @Test fun translateBackfillPostsAndReadsCount() = runBlocking {
+        server.enqueue(json(200, """{"queued":42}"""))
+        assertEquals(42, api.translateBackfill().queued)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/api/admin/translate-backfill", req.url.encodedPath)
+    }
 }

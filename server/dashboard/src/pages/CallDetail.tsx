@@ -21,9 +21,14 @@ export function CallDetailPage() {
   const [speed, setSpeed] = useState(1);
   const [copied, setCopied] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // null = not chosen yet: default to English whenever a translation exists.
+  const [langChoice, setLangChoice] = useState<"en" | "orig" | null>(null);
 
   const segments = useMemo(() => parseSegments(call.data?.transcript?.segments), [call.data]);
   const hasAudio = !!call.data?.filePath;
+  const hasEnglish = !!call.data?.transcript?.textEn;
+  const english = hasEnglish && (langChoice ?? "en") === "en";
+  const segText = (s: { text: string; en: string | null }) => (english ? s.en ?? s.text : s.text);
 
   const del = useMutation({
     mutationFn: () => api<void>(`/api/calls/${id}`, { method: "DELETE" }),
@@ -50,7 +55,10 @@ export function CallDetailPage() {
   const copy = async () => {
     const t = call.data?.transcript;
     if (!t) return;
-    const text = segments.length ? segments.map((s) => (s.speaker ? `${s.speaker}: ${s.text}` : s.text)).join("\n") : t.text;
+    const text = segments.length ? segments.map((s) => (s.speaker ? `${s.speaker}: ${segText(s)}` : segText(s))).join("\n")
+      : english
+        ? (t.textEn ?? t.text)
+        : t.text;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -182,12 +190,44 @@ export function CallDetailPage() {
               <h2 id="transcript-h" className="font-semibold">
                 Transcript
               </h2>
-              {c.transcript && (
-                <button type="button" className="btn-ghost min-h-9 px-3" onClick={() => void copy()}>
-                  <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
-                </button>
-              )}
+              <div className="flex flex-wrap items-center gap-2">
+                {hasEnglish && (
+                  <div className="flex gap-1" role="group" aria-label="Transcript language">
+                    {(
+                      [
+                        ["en", "English"],
+                        ["orig", "Original"],
+                      ] as const
+                    ).map(([k, label]) => {
+                      const on = (k === "en") === english;
+                      return (
+                        <button
+                          key={k}
+                          type="button"
+                          aria-pressed={on}
+                          className={`min-h-9 rounded-full border px-3 text-xs font-medium ${
+                            on ? "border-brand-600 bg-brand-600 text-white" : "border-slate-300 dark:border-slate-700"
+                          }`}
+                          onClick={() => setLangChoice(k)}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                {c.transcript && (
+                  <button type="button" className="btn-ghost min-h-9 px-3" onClick={() => void copy()}>
+                    <span aria-live="polite">{copied ? "Copied" : "Copy"}</span>
+                  </button>
+                )}
+              </div>
             </div>
+            {c.transcript?.translationPending && !hasEnglish && (
+              <p className="mb-2 text-xs text-slate-500" role="status">
+                English translation in progress.
+              </p>
+            )}
             {!c.transcript ? (
               <p className="text-sm text-slate-500">
                 {c.status === "FAILED" ? "Transcription failed." : c.status === "TRANSCRIBING" ? "Transcribing now…" : "Not transcribed yet."}
@@ -203,7 +243,7 @@ export function CallDetailPage() {
                       </span>
                       <span className="min-w-0">
                         {s.speaker && <span className="mr-1 text-xs font-semibold">{s.speaker}</span>}
-                        <span className="text-sm leading-relaxed">{s.text}</span>
+                        <span className="text-sm leading-relaxed">{segText(s)}</span>
                       </span>
                     </>
                   );
@@ -211,7 +251,7 @@ export function CallDetailPage() {
                   return (
                     <li key={i} aria-current={i === active ? "true" : undefined}>
                       {clickable ? (
-                        <button type="button" className={`${cls} hover:bg-slate-100 dark:hover:bg-slate-800`} onClick={() => playFrom(s.startMs!)} aria-label={`Play from ${formatDuration(Math.floor(s.startMs! / 1000))}: ${s.text}`}>
+                        <button type="button" className={`${cls} hover:bg-slate-100 dark:hover:bg-slate-800`} onClick={() => playFrom(s.startMs!)} aria-label={`Play from ${formatDuration(Math.floor(s.startMs! / 1000))}: ${segText(s)}`}>
                           {body}
                         </button>
                       ) : (
@@ -222,7 +262,7 @@ export function CallDetailPage() {
                 })}
               </ol>
             ) : (
-              <p className="whitespace-pre-wrap text-sm leading-relaxed">{c.transcript.text || "Empty transcript."}</p>
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">{(english ? c.transcript.textEn : c.transcript.text) || "Empty transcript."}</p>
             )}
           </section>
         </div>

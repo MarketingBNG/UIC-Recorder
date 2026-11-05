@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type CallStatus, type Device, type Stats } from "../api";
+import { api, type CallStatus, type TranslateBackfillResult, type Device, type Stats } from "../api";
 import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
@@ -54,6 +54,7 @@ export function HealthPage() {
       {stats.isError && <p className="mb-4 text-sm text-amber-700 dark:text-amber-300">Server stats unavailable: {stats.error.message}</p>}
 
       <FirefliesPanel />
+      {isAdmin && <TranslateBackfill />}
 
       {devices.isPending ? (
         <Spinner label="Loading devices" />
@@ -184,5 +185,31 @@ function StatsHeader({ s }: { s: Stats }) {
         </div>
       </details>
     </div>
+  );
+}
+
+/** Admin: queue English translations for every transcript that has none yet. */
+function TranslateBackfill() {
+  const run = useMutation({
+    mutationFn: () => api<TranslateBackfillResult>("/api/admin/translate-backfill", { method: "POST", body: {} }),
+  });
+  return (
+    <section aria-labelledby="translate-h" className="card mb-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="translate-h" className="font-semibold">
+            English translations
+          </h2>
+          <p className="text-sm text-slate-500">New transcripts are translated automatically. Queue older ones here (batch rate, may take hours).</p>
+        </div>
+        <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate()}>
+          {run.isPending ? "Queuing…" : "Translate existing transcripts"}
+        </button>
+      </div>
+      <p className="mt-2 text-sm" role="status" aria-live="polite">
+        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} transcript${run.data.queued === 1 ? "" : "s"} for translation.` : "Nothing to queue: every transcript is translated or already queued.")}
+      </p>
+      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
+    </section>
   );
 }

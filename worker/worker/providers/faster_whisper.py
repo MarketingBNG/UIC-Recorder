@@ -12,6 +12,10 @@ class FasterWhisperProvider:
     def __init__(self, settings: Settings) -> None:
         from faster_whisper import WhisperModel  # heavy import, only when selected
 
+        if settings.whisper_task == "translate" and "turbo" in settings.whisper_model:
+            raise SystemExit("WHISPER_TASK=translate needs WHISPER_MODEL=large-v3 (turbo can't translate)")
+        self.task = settings.whisper_task
+
         self.model = WhisperModel(
             settings.whisper_model,
             device=settings.whisper_device,
@@ -26,6 +30,7 @@ class FasterWhisperProvider:
         segments, info = self.model.transcribe(
             str(audio),
             language=language,
+            task=self.task,
             vad_filter=True,
             beam_size=5,
             condition_on_previous_text=False,

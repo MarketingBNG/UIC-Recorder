@@ -5,6 +5,7 @@ import { HttpError, currentUser, type Deps } from "../context.js";
 import { Prisma, type AuditAction, type User } from "../generated/prisma/client.js";
 import { DeviceConfig, getSettings } from "../settings.js";
 import { firefliesUsage } from "../fireflies/budget.js";
+import { queueTranslationBackfill } from "../jobs/queue.js";
 
 const ListQuery = z.object({
   q: z.string().trim().max(200).optional(),
@@ -121,11 +122,17 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       where: { AND: [{ id: idParam(req) }, callScope(currentUser(req))] },
       include: {
         user: { select: { id: true, name: true, email: true } },
-        transcript: { select: { text: true, language: true, provider: true, segments: true } },
+        transcript: {
+          select: { text: true, language: true, provider: true, segments: true, textEn: true, translationModel: true },
+        },
       },
     });
     if (!call) throw new HttpError(404, "Not found");
-    return { ...call, fileSize: call.fileSize?.toString() ?? null };
+    const pending = call.transcript
+      ? await deps.db.job.count({ where: { callId: call.id, kind: "translate", status: { in: ["QUEUED", "RUNNING"] } } })
+      : 0;
+    const transcript = call.transcript ? { ...call.transcript, translationPending: pending > 0 } : null;
+    return { ...call, transcript, fileSize: call.fileSize?.toString() ?? null };
   });
 
   /** Audio playback with HTTP Range support (seeking in the browser player). */
@@ -219,6 +226,13 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   // ---- Settings & health ------------------------------------------------
 
   app.get("/api/settings", admins, async () => getSettings(deps.db));
+
+  /** Queues English translation for every transcript that doesn't have one yet. */
+  app.post("/api/admin/translate-backfill", admins, async (req) => {
+    const queued = await queueTranslationBackfill(deps.db);
+    req.log.info({ queued, by: currentUser(req).id }, "translate backfill queued");
+    return { queued };
+  });
 
   app.put("/api/settings/device-config", admins, async (req) => {
     const deviceConfig = DeviceConfig.parse(req.body);
