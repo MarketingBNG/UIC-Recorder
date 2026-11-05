@@ -14,6 +14,8 @@ import structlog
 from .config import Settings
 from .translate import TranslationError, translate_batch, translate_segments
 
+CLAIM_MAX = 20  # server limit per /internal/jobs/claim
+
 log = structlog.get_logger()
 
 LIVE_PRIORITY = 10
@@ -93,7 +95,8 @@ class Translator:
     def tick(self) -> int:
         """One round: claim, start a due batch, run live jobs. Returns jobs claimed."""
         jobs: list[dict] = []
-        room = self.settings.translate_batch_max - len(self.pending)
+        # The API hands out at most CLAIM_MAX jobs per request; bigger batches fill over several ticks.
+        room = min(CLAIM_MAX, self.settings.translate_batch_max - len(self.pending))
         if not self.stopping() and room > 0:
             try:
                 jobs = self.api.claim(room, ("translate",))

@@ -259,3 +259,10 @@ def test_lost_lock_drops_job_from_pending_and_heartbeats():
     t.beat_once()
     assert [j["jobId"] for j in t.pending] == ["j2"]
     assert t.held == {"j2"}
+
+
+def test_claim_never_asks_for_more_than_server_limit():
+    # The API rejects limit > 20 with 400; a batch of 100 fills over several claims.
+    api = FakeApi([], {})
+    Translator(api, FakeClient(), Settings.from_env(KEYED)).tick()
+    assert api.claims and all(limit <= 20 for limit, _ in api.claims)
