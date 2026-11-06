@@ -19,6 +19,7 @@ _EXT = {"audio/mp4": ".m4a", "audio/mpeg": ".mp3", "audio/aac": ".aac", "audio/a
         "audio/webm": ".webm"}
 
 HEARTBEAT_SECONDS = 60
+SWEEP_SECONDS = 6 * 3600
 
 
 def _is_transient(e: BaseException) -> bool:
@@ -86,6 +87,14 @@ class Api:
         res = self.http.get(f"/internal/transcripts/{call_id}")
         res.raise_for_status()
         return res.json()
+
+    @_network_retry
+    def has_transcript(self, call_id: str) -> bool:
+        res = self.http.get(f"/internal/transcripts/{call_id}")
+        if res.status_code == 404:
+            return False
+        res.raise_for_status()
+        return True
 
     @_network_retry
     def post_translation(self, job_id: str, payload: dict) -> None:
@@ -206,6 +215,10 @@ def run(settings: Settings) -> None:
 
         translator = Translator.start(api, settings, lambda: stopping)
 
+    if hasattr(provider, "sweep_leftovers"):
+        threading.Thread(target=_sweep_loop, args=(api, provider, lambda: stopping), daemon=True,
+                         name="fireflies-sweep").start()
+
     # Up to `concurrency` jobs run at once; we only claim as many as we have free slots,
     # so other workers can take the rest of the queue.
     running: set[Future] = set()
@@ -232,6 +245,21 @@ def run(settings: Settings) -> None:
                 idle = min(idle * 2, settings.idle_max_sleep)
     if translator:
         translator.join()
+
+
+def _sweep_loop(api: Api, provider, is_stopping) -> None:
+    """Every few hours, delete transcripts a failed delete left in Fireflies."""
+    while not is_stopping():
+        try:
+            n = provider.sweep_leftovers(api)
+            if n:
+                log.info("fireflies leftovers deleted", count=n)
+        except Exception:
+            log.exception("fireflies sweep failed")
+        for _ in range(SWEEP_SECONDS):
+            if is_stopping():
+                return
+            time.sleep(1)
 
 
 def _safe_process(api: Api, provider: Provider, job: dict, language: str | None) -> None:

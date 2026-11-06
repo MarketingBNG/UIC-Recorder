@@ -188,3 +188,38 @@ def test_dropped_upload_connection_counts_as_uploaded():
     assert not routes["finalize"].called
     assert respx.calls.call_count >= 1
     assert sum(1 for c in respx.calls if str(c.request.url) == URL) == 1
+
+
+CID_DONE = "01a1ab14-052e-73fb-bea8-2c76560a27b3"
+CID_WAITING = "01a1ab14-0000-7000-8000-000000000000"
+
+
+@respx.mock
+def test_sweep_deletes_only_saved_uic_transcripts():
+    api, ff = make()
+    respx.get(f"http://api.test/internal/transcripts/{CID_DONE}").mock(return_value=httpx.Response(200, json={}))
+    respx.get(f"http://api.test/internal/transcripts/{CID_WAITING}").mock(return_value=httpx.Response(404))
+    seen = graphql({
+        "Leftovers": [httpx.Response(200, json={"data": {"transcripts": [
+            {"id": "a", "title": f"uic-{CID_DONE}"},
+            {"id": "b", "title": f"uic-{CID_WAITING}"},
+            {"id": "c", "title": "UIC-Renuka Malik-Us Inco"},
+        ]}})],
+        "deleteTranscript": [httpx.Response(200, json={"data": {"deleteTranscript": {"id": "a"}}})],
+    })
+    assert ff.sweep_leftovers(api) == 1
+    deletes = [b["variables"]["id"] for b in seen if "deleteTranscript" in b["query"]]
+    assert deletes == ["a"]
+    assert "toDate" in seen[0]["variables"]
+
+
+@respx.mock
+def test_sweep_ignores_already_deleted():
+    api, ff = make()
+    respx.get(f"http://api.test/internal/transcripts/{CID_DONE}").mock(return_value=httpx.Response(200, json={}))
+    graphql({
+        "Leftovers": [httpx.Response(200, json={"data": {"transcripts": [{"id": "a", "title": f"uic-{CID_DONE}"}]}})],
+        "deleteTranscript": [httpx.Response(200, json={"errors": [
+            {"message": "Transcript not found", "extensions": {"code": "object_not_found"}}]})],
+    })
+    assert ff.sweep_leftovers(api) == 0

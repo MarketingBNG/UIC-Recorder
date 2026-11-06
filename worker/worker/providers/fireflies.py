@@ -67,6 +67,10 @@ GET = """query Get($id: String!) {
   }
 }"""
 DELETE = """mutation Delete($id: String!) { deleteTranscript(id: $id) { id } }"""
+LEFTOVERS = """query Leftovers($toDate: DateTime, $skip: Int) {
+  transcripts(keyword: "uic-", scope: "title", toDate: $toDate, mine: true, limit: 50, skip: $skip) { id title }
+}"""
+OUR_TITLE = re.compile(r"^uic-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
 
 
 class HardStop(Exception):
@@ -218,6 +222,32 @@ class FirefliesProvider:
             except Exception as e:  # noqa: BLE001 - transcript is saved; deletion is best effort
                 log.warning("fireflies delete failed", transcript_id=t["id"], error=str(e))
         return Transcript(text=text, provider=self.name, language=language, segments=segments)
+
+    def sweep_leftovers(self, api: Api, min_age_s: float = 3600) -> int:
+        """Delete our uploads (title uic-<callId>) that a failed delete left in Fireflies.
+        Only ones older than min_age_s whose transcript is already saved on our server,
+        so a job still waiting for Fireflies is never affected. Returns how many were deleted."""
+        to_date = (datetime.now(UTC) - timedelta(seconds=min_age_s)).isoformat().replace("+00:00", "Z")
+        found: list[dict] = []
+        for page in range(20):  # at most 1000 per sweep; the next sweep picks up the rest
+            batch = self._gql(LEFTOVERS, {"toDate": to_date, "skip": page * 50}).get("transcripts") or []
+            found += batch
+            if len(batch) < 50:
+                break
+        deleted = 0
+        for t in found:
+            m = OUR_TITLE.match(t.get("title") or "")
+            if not m or not api.has_transcript(m.group(1)):
+                continue
+            try:
+                self._gql(DELETE, {"id": t["id"]}, max_tries=3)
+                deleted += 1
+            except FirefliesError as e:
+                if e.code != "object_not_found":  # already gone; search can list deleted ones for a while
+                    log.warning("fireflies sweep delete failed", transcript_id=t["id"], error=str(e))
+            except Exception as e:  # noqa: BLE001 - try again next sweep
+                log.warning("fireflies sweep delete failed", transcript_id=t["id"], error=str(e))
+        return deleted
 
     def _wait_for_transcript(self, title: str) -> dict:
         start = time.monotonic()
