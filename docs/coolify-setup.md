@@ -84,3 +84,10 @@ Every new transcript also gets an English version, made by Claude Opus 5.5 on th
 2. On `uic-worker`, set `ANTHROPIC_API_KEY`. Without it the worker doesn't take translate jobs and they wait in the queue. Optional settings are in `worker/.env.example`.
 3. To translate transcripts made before this feature, an admin sends `POST /api/admin/translate-backfill` (the dashboard settings page has a button for it). It queues one job per untranslated transcript and returns `{ "queued": n }`. These run as low-priority batches.
 4. A failed translation doesn't change the call: it stays `TRANSCRIBED` and shows the original transcript.
+
+## Alerts (Zoho Cliq)
+The API checks every 5 minutes and posts to a Zoho Cliq channel when something breaks: no worker contact for 10 min, a Fireflies hard stop or 80%/100% of the monthly budget, more than 5% of transcription jobs failing in the last hour, queued jobs not moving for 2 h, server disk over 80%, or a phone not seen for 48 h. An ongoing problem repeats at most every 6 h, and a "Resolved" message is posted when it clears.
+
+1. In Zoho Cliq, create a webhook token (**Bots & Tools → Webhook Tokens**). The URL is `https://cliq.zoho.in/api/v2/channelsbyname/<channel>/message?zapikey=<token>` (use your Cliq domain). Treat it as a secret.
+2. On `uic-api`, set `CLIQ_WEBHOOK_URL` and redeploy. Empty means alerts are off.
+3. Health page → **Send test alert** (admin) to check the channel gets messages.

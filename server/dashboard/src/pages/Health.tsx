@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type CallStatus, type TranslateBackfillResult, type Device, type Stats } from "../api";
+import { api, type CallStatus, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
 import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
@@ -55,6 +55,7 @@ export function HealthPage() {
 
       <FirefliesPanel />
       {isAdmin && <TranslateBackfill />}
+      {isAdmin && <TestAlert enabled={stats.data?.alertsEnabled} />}
 
       {devices.isPending ? (
         <Spinner label="Loading devices" />
@@ -146,8 +147,9 @@ function StatsHeader({ s }: { s: Stats }) {
         {tile("Stale phones", s.staleDevices, s.staleDevices > 0)}
         {tile("Failed calls", s.calls.FAILED ?? 0, (s.calls.FAILED ?? 0) > 0)}
         {tile("Transcription queue", jobsWaiting)}
-        {tile("Server disk used", `${s.disk.usedPct}%`, s.disk.usedPct >= 85)}
+        {tile("Server disk used", `${s.disk.usedPct}%`, s.disk.usedPct > 80)}
       </div>
+      {s.throughput && <ThroughputTiles t={s.throughput} tile={tile} />}
       <details className="card p-3 text-sm">
         <summary className="cursor-pointer font-medium">Details</summary>
         <div className="mt-2 grid gap-4 sm:grid-cols-3">
@@ -185,6 +187,57 @@ function StatsHeader({ s }: { s: Stats }) {
         </div>
       </details>
     </div>
+  );
+}
+
+/** Rough "how long until the backlog is done" text. */
+function etaText(t: Throughput): string {
+  if (t.backlogCalls === 0) return "No backlog";
+  const parts: string[] = [];
+  if (t.backlogEtaMonths !== null) parts.push(`${t.backlogEtaMonths} mo of Fireflies budget`);
+  if (t.backlogEtaHours !== null) parts.push(t.backlogEtaHours >= 48 ? `${Math.round(t.backlogEtaHours / 24)} d at current rate` : `${t.backlogEtaHours} h at current rate`);
+  return parts.join(" · ") || "Unknown";
+}
+
+function ThroughputTiles({ t, tile }: { t: Throughput; tile: (label: string, value: string | number, warn?: boolean) => React.ReactNode }) {
+  return (
+    <>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {tile("Jobs per hour (24 h)", t.jobsPerHour)}
+        {tile("Failure rate (24 h)", `${t.failureRatePct}%`, t.failureRatePct > 5)}
+        {tile("Avg seconds per job", t.avgJobSeconds ?? "–")}
+        {tile("Backlog", `${t.backlogCalls} calls · ${t.backlogMinutes} min`)}
+      </div>
+      <p className="text-sm text-slate-500">Backlog ETA: {etaText(t)}</p>
+    </>
+  );
+}
+
+/** Admin: post a test message to the Zoho Cliq alert channel. */
+function TestAlert({ enabled }: { enabled: boolean | undefined }) {
+  const run = useMutation({ mutationFn: () => api<{ sent: boolean }>("/api/admin/test-alert", { method: "POST", body: {} }) });
+  return (
+    <section aria-labelledby="alerts-h" className="card mb-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="alerts-h" className="font-semibold">
+            Alerts
+          </h2>
+          <p className="text-sm text-slate-500">
+            {enabled === false
+              ? "Off: set CLIQ_WEBHOOK_URL on the server to get Zoho Cliq alerts."
+              : "Zoho Cliq gets a message when the worker stops, Fireflies blocks us, the disk passes 80%, jobs fail or a phone stops syncing."}
+          </p>
+        </div>
+        <button type="button" className="btn-outline" disabled={run.isPending || enabled === false} onClick={() => run.mutate()}>
+          {run.isPending ? "Sending…" : "Send test alert"}
+        </button>
+      </div>
+      <p className="mt-2 text-sm" role="status" aria-live="polite">
+        {run.isSuccess && "Test alert sent. Check the Cliq channel."}
+      </p>
+      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
+    </section>
   );
 }
 

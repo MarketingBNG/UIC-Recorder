@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { touchWorker } from "../alerts/checks.js";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
 import { JOB_KINDS, claimJobs, completeJob, completeTranslation, failJob, heartbeatJob } from "../jobs/queue.js";
@@ -44,6 +45,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
 
   app.post("/internal/jobs/claim", auth, async (req) => {
     const { workerId, limit, kinds } = Claim.parse(req.body);
+    await touchWorker(deps.db, workerId);
     const jobs = await claimJobs(deps.db, workerId, limit, kinds);
     if (jobs.length === 0) return { jobs: [] };
     const calls = await deps.db.call.findMany({
@@ -92,6 +94,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/heartbeat", auth, async (req, reply) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const { workerId } = z.object({ workerId: z.string().max(100) }).parse(req.body);
+    await touchWorker(deps.db, workerId);
     if (!(await heartbeatJob(deps.db, jobId, workerId))) throw new HttpError(409, "Job is not locked by this worker");
     return reply.code(204).send();
   });

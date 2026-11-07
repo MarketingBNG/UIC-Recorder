@@ -191,6 +191,9 @@ class ApiClient(
     /** Queues an English translation for every transcript that has none yet (admin only). */
     suspend fun translateBackfill(): TranslateBackfill = post("/api/admin/translate-backfill", JsonObject(emptyMap()))
 
+    /** Posts a test message to the Zoho Cliq alert channel (admin only). */
+    suspend fun testAlert(): TestAlertResult = post("/api/admin/test-alert", JsonObject(emptyMap()))
+
     // ---- Plumbing ---------------------------------------------------------
 
     fun url(path: String, query: Map<String, String?> = emptyMap()): HttpUrl =

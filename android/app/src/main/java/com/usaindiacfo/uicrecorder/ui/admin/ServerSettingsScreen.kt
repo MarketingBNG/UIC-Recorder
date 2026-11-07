@@ -207,6 +207,9 @@ private fun ConfigEditor(
         HorizontalDivider()
         TranslateBackfillSection()
 
+        HorizontalDivider()
+        TestAlertSection()
+
         latestApp?.let {
             HorizontalDivider()
             Text("Published app", style = MaterialTheme.typography.labelLarge)
@@ -237,6 +240,31 @@ private fun TranslateBackfillSection() {
         },
         enabled = !busy,
     ) { Text(if (busy) "Queuing…" else "Translate existing transcripts") }
+    result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+/** Posts a test message to the Zoho Cliq alert channel. */
+@Composable
+private fun TestAlertSection() {
+    val api = appContainer().apiClient
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    Text("Alerts", style = MaterialTheme.typography.labelLarge)
+    Text("Zoho Cliq gets a message when the worker stops, Fireflies blocks us, the disk passes 80%, jobs fail or a phone stops syncing.",
+        style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(
+        onClick = {
+            busy = true; result = null
+            scope.launch {
+                apiCall { api.testAlert() }
+                    .onSuccess { result = "Test alert sent. Check the Cliq channel." }
+                    .onFailure { result = it.userMessage() }
+                busy = false
+            }
+        },
+        enabled = !busy,
+    ) { Text(if (busy) "Sending…" else "Send test alert") }
     result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 }
 

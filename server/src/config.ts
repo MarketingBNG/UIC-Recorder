@@ -32,6 +32,9 @@ const schema = z.object({
   // Optional: enables /internal/import/* for bulk-importing already-copied recordings.
   IMPORT_TOKEN: z.string().min(32).optional().or(z.literal("").transform(() => undefined)),
 
+  // Optional Zoho Cliq channel incoming-webhook URL (includes its zapikey: a secret). Empty = alerts off.
+  CLIQ_WEBHOOK_URL: z.url().optional().or(z.literal("").transform(() => undefined)),
+
   DEFAULT_PHONE_REGION: z.string().length(2).default("IN"),
 
   // Queue an English translation job after every transcript (worker needs ANTHROPIC_API_KEY to run them).

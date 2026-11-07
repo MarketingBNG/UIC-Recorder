@@ -184,12 +184,16 @@ model Job {
   runAfter  DateTime  @default(now()) @map("run_after")
   lockedAt  DateTime? @map("locked_at")
   lockedBy  String?   @map("locked_by")
+  // Set when claimed / when DONE or FAILED; used for throughput metrics.
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
   call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
 
   @@index([status, priority(sort: Desc), createdAt])
+  @@index([finishedAt])
   @@map("jobs")
 }
 
@@ -246,4 +250,24 @@ model FirefliesReservation {
   @@index([month, status])
   @@index([callId, status])
   @@map("fireflies_reservations")
+}
+
+// Last time each worker polled or heartbeated (worker IDs change on restart).
+model WorkerSeen {
+  workerId   String   @id @map("worker_id")
+  lastSeenAt DateTime @map("last_seen_at")
+
+  @@map("worker_seen")
+}
+
+// Zoho Cliq alert dedupe: an active alert repeats at most every 6 h; "resolved" is sent once.
+model AlertState {
+  key        String    @id
+  active     Boolean   @default(false)
+  message    String?
+  firstAt    DateTime? @map("first_at")
+  lastSentAt DateTime? @map("last_sent_at")
+  resolvedAt DateTime? @map("resolved_at")
+
+  @@map("alert_states")
 }

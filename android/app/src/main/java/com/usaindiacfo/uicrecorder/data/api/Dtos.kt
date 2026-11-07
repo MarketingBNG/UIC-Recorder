@@ -221,7 +221,39 @@ data class Stats(
     val staleDevices: Int,
     /** Absent on servers older than the Fireflies provider. */
     val fireflies: FirefliesStats? = null,
+    /** Absent on servers before alerting (M1). */
+    val throughput: Throughput? = null,
+    val alertsEnabled: Boolean? = null,
 )
+
+/** Transcription throughput and backlog ETA from GET /api/stats. */
+@Serializable
+data class Throughput(
+    val jobsPerHour: Double = 0.0,
+    val doneLastHour: Int = 0,
+    val failureRatePct: Double = 0.0,
+    val failureRatePctLastHour: Double = 0.0,
+    val avgJobSeconds: Int? = null,
+    val backlogCalls: Int = 0,
+    val backlogMinutes: Int = 0,
+    val backlogEtaMonths: Double? = null,
+    val backlogEtaHours: Int? = null,
+) {
+    /** Same wording as the dashboard Health page. */
+    fun etaText(): String {
+        if (backlogCalls == 0) return "No backlog"
+        val parts = buildList {
+            backlogEtaMonths?.let { add("${fmt(it)} mo of Fireflies budget") }
+            backlogEtaHours?.let { add(if (it >= 48) "${Math.round(it / 24.0)} d at current rate" else "$it h at current rate") }
+        }
+        return parts.joinToString(" · ").ifEmpty { "Unknown" }
+    }
+
+    private fun fmt(d: Double) = if (d == Math.floor(d)) d.toLong().toString() else d.toString()
+}
+
+/** POST /api/admin/test-alert response. */
+@Serializable data class TestAlertResult(val sent: Boolean = false)
 
 // ---- Fireflies (/api/fireflies/usage, PUT /api/settings/fireflies) ----------
 

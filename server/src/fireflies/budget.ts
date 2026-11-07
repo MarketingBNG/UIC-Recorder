@@ -9,7 +9,7 @@ export const GATE_RETRY_MS = 3600_000;
 /** RESERVED rows untouched this long belong to a dead job; they're settled automatically. */
 const STALE_RESERVATION_HOURS = 6;
 /** Bytes/second assumed when a call has no duration. Low on purpose: overestimates minutes. */
-const ESTIMATE_BYTES_PER_S = 2000;
+export const ESTIMATE_BYTES_PER_S = 2000;
 export const ALERT_THRESHOLDS = [50, 80, 100] as const;
 
 export const monthKey = (d = new Date()) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;

@@ -6,6 +6,8 @@ import { Prisma, type AuditAction, type User } from "../generated/prisma/client.
 import { DeviceConfig, getSettings } from "../settings.js";
 import { firefliesUsage } from "../fireflies/budget.js";
 import { queueTranslationBackfill } from "../jobs/queue.js";
+import { cliqSender } from "../alerts/cliq.js";
+import { throughput } from "../alerts/metrics.js";
 
 const ListQuery = z.object({
   q: z.string().trim().max(200).optional(),
@@ -234,6 +236,16 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     return { queued };
   });
 
+  /** Posts a test message to the Zoho Cliq channel (bypasses dedupe). */
+  app.post("/api/admin/test-alert", admins, async (req) => {
+    const url = deps.config.CLIQ_WEBHOOK_URL;
+    if (!url) throw new HttpError(409, "Alerts are off: CLIQ_WEBHOOK_URL is not set on the server");
+    const by = currentUser(req);
+    const ok = await cliqSender(url, (m) => req.log.warn(m))(`Test alert from UIC Recorder, sent by ${by.name ?? by.email}.`);
+    if (!ok) throw new HttpError(502, "Zoho Cliq did not accept the message; check the webhook URL");
+    return { sent: true };
+  });
+
   app.put("/api/settings/device-config", admins, async (req) => {
     const deviceConfig = DeviceConfig.parse(req.body);
     await deps.db.setting.upsert({ where: { id: 1 }, create: { id: 1, deviceConfig }, update: { deviceConfig } });
@@ -241,18 +253,22 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get("/api/stats", managers, async () => {
-    const [byStatus, queue, disk, staleDevices, fireflies] = await Promise.all([
+    const [byStatus, queue, disk, staleDevices, fireflies, rates] = await Promise.all([
       deps.db.call.groupBy({ by: ["status"], _count: true }),
       deps.db.job.groupBy({ by: ["status"], _count: true }),
       deps.storage.diskUsage(),
       deps.db.device.count({ where: { revokedAt: null, lastSeenAt: { lt: new Date(Date.now() - 24 * 3600_000) } } }),
       firefliesUsage(deps.db),
+      throughput(deps.db),
     ]);
     return {
       calls: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
       jobs: Object.fromEntries(queue.map((r) => [r.status, r._count])),
       disk: { ...disk, usedPct: Math.round((1 - disk.freeBytes / disk.totalBytes) * 100) },
       staleDevices,
+      // Throughput + backlog ETA (additive).
+      throughput: rates,
+      alertsEnabled: !!deps.config.CLIQ_WEBHOOK_URL,
       // Banner state for the dashboard / app (additive).
       fireflies: {
         month: fireflies.month,

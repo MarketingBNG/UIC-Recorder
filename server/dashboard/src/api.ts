@@ -83,6 +83,20 @@ export interface Stats {
   disk: { freeBytes: number; totalBytes: number; usedPct: number };
   staleDevices: number;
   fireflies?: FirefliesAlert;
+  /** Absent on servers before alerting (M1). */
+  throughput?: Throughput;
+  alertsEnabled?: boolean;
+}
+export interface Throughput {
+  jobsPerHour: number;
+  doneLastHour: number;
+  failureRatePct: number;
+  failureRatePctLastHour: number;
+  avgJobSeconds: number | null;
+  backlogCalls: number;
+  backlogMinutes: number;
+  backlogEtaMonths: number | null;
+  backlogEtaHours: number | null;
 }
 export interface FirefliesAlert {
   month: string;

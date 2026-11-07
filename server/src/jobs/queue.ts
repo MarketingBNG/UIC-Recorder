@@ -2,6 +2,8 @@ import type { Db } from "../db.js";
 
 export const MAX_ATTEMPTS = 5;
 export const STALE_LOCK_MINUTES = 10;
+/** lastError of a translate job replaced by a newer transcript (not a real failure). */
+export const SUPERSEDED = "superseded by re-transcription";
 
 export const JOB_KINDS = ["transcribe", "translate"] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
@@ -30,6 +32,7 @@ export async function claimJobs(
     UPDATE "jobs" SET
       "status" = 'RUNNING',
       "locked_at" = now(),
+      "started_at" = now(),
       "locked_by" = ${workerId},
       "attempts" = "attempts" + 1,
       "updated_at" = now()
@@ -51,7 +54,8 @@ async function failExhaustedStaleJobs(db: Db): Promise<void> {
   await db.$executeRaw`
     WITH dead AS (
       UPDATE "jobs" SET "status" = 'FAILED', "locked_at" = NULL, "locked_by" = NULL,
-        "last_error" = coalesce("last_error", 'worker stopped responding'), "updated_at" = now()
+        "last_error" = coalesce("last_error", 'worker stopped responding'),
+        "finished_at" = now(), "updated_at" = now()
       WHERE "status" = 'RUNNING'
         AND "locked_at" < now() - make_interval(mins => ${STALE_LOCK_MINUTES})
         AND "attempts" >= ${MAX_ATTEMPTS}
@@ -102,13 +106,13 @@ export async function completeJob(
       translationModel: null,
     };
     await tx.transcript.upsert({ where: { callId: job.callId }, create: { callId: job.callId, ...data }, update: data });
-    await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null } });
+    await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
     await tx.call.update({ where: { id: job.callId }, data: { status: "TRANSCRIBED" } });
     // A running translate job already read the old transcript: take it out of play so
     // its later result is rejected (lock lost) instead of overwriting the new segments.
     await tx.job.updateMany({
       where: { callId: job.callId, kind: "translate", status: "RUNNING" },
-      data: { status: "FAILED", lockedBy: null, lockedAt: null, lastError: "superseded by re-transcription" },
+      data: { status: "FAILED", lockedBy: null, lockedAt: null, lastError: SUPERSEDED, finishedAt: new Date() },
     });
     if (opts.translate) {
       // A queued one is fine: it reads the new transcript when claimed.
@@ -138,7 +142,7 @@ export async function completeTranslation(db: Db, jobId: string, workerId: strin
       data: { textEn: result.textEn, translationModel: result.model, segments: result.segments as object[] },
     });
     if (count !== 1) return false;
-    await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null } });
+    await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
     return true;
   });
 }
@@ -171,6 +175,7 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
         lockedAt: null,
         lockedBy: null,
         runAfter: giveUp ? job.runAfter : new Date(Date.now() + backoffMs),
+        finishedAt: giveUp ? new Date() : null,
       },
     });
     // A translate job never changes the call: it stays TRANSCRIBED.

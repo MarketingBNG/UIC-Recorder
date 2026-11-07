@@ -128,4 +128,26 @@ class ApiClientTest {
         assertEquals("POST", req.method)
         assertEquals("/api/admin/translate-backfill", req.url.encodedPath)
     }
+
+    @Test fun statsDecodesThroughput() = runBlocking {
+        server.enqueue(json(200, """{"calls":{},"jobs":{},"disk":{"totalBytes":10,"freeBytes":5,"usedPct":50},"staleDevices":0,
+            "alertsEnabled":true,"throughput":{"jobsPerHour":12.5,"doneLastHour":10,"failureRatePct":2.1,"failureRatePctLastHour":0,
+            "avgJobSeconds":null,"backlogCalls":300,"backlogMinutes":32400,"backlogEtaMonths":2,"backlogEtaHours":24}}"""))
+        val s = api.stats()
+        assertEquals(true, s.alertsEnabled)
+        val t = s.throughput!!
+        assertEquals(12.5, t.jobsPerHour, 0.0)
+        assertNull(t.avgJobSeconds)
+        assertEquals("2 mo of Fireflies budget · 24 h at current rate", t.etaText())
+        assertEquals("No backlog", t.copy(backlogCalls = 0).etaText())
+        assertEquals("3 d at current rate", t.copy(backlogEtaMonths = null, backlogEtaHours = 72).etaText())
+    }
+
+    @Test fun testAlertPosts() = runBlocking {
+        server.enqueue(json(200, """{"sent":true}"""))
+        assertEquals(true, api.testAlert().sent)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/api/admin/test-alert", req.url.encodedPath)
+    }
 }

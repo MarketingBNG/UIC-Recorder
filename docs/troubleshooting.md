@@ -2,6 +2,10 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Bash heredoc failed with "unexpected EOF while looking for matching `'`" (local dev)
+- **Cause:** a long test file written through a shell heredoc contained characters the Git Bash wrapper mis-parsed.
+- **Fix:** wrote the file with the editor instead of `cat <<'EOF'`.
+
 ## Worker translate claim failed with 400 Bad Request
 - **Cause:** the worker asked for up to 100 translate jobs per claim; the API allows at most 20.
 - **Fix:** the worker caps each claim at 20 (`CLAIM_MAX` in `worker/worker/translator.py`); a batch of 100 fills over several claims.

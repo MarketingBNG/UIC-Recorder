@@ -143,7 +143,7 @@ private fun StatsHeader(s: Stats) {
             Text("Server health", style = MaterialTheme.typography.titleSmall)
             if (s.calls.isNotEmpty()) StatLine("Calls", s.calls)
             if (s.jobs.isNotEmpty()) StatLine("Queue", s.jobs, ::jobStatusLabel)
-            val diskColor = if (s.disk.usedPct >= 90) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            val diskColor = if (s.disk.usedPct > 80) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
             Text(
                 "Disk ${s.disk.usedPct}% used · ${formatBytes(s.disk.freeBytes)} free of ${formatBytes(s.disk.totalBytes)}",
                 style = MaterialTheme.typography.bodySmall,
@@ -153,6 +153,18 @@ private fun StatsHeader(s: Stats) {
                 color = diskColor,
                 modifier = Modifier.fillMaxWidth(),
             )
+            s.throughput?.let { t ->
+                val failColor = if (t.failureRatePct > 5) MaterialTheme.colorScheme.error else Color.Unspecified
+                Text(
+                    "${t.jobsPerHour} jobs/h · ${t.avgJobSeconds?.let { "${it}s per job" } ?: "no recent jobs"}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text("Failure rate ${t.failureRatePct}% (24 h)", style = MaterialTheme.typography.bodySmall, color = failColor)
+                Text(
+                    "Backlog ${t.backlogCalls} calls · ${t.backlogMinutes} min · ETA ${t.etaText()}",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             Text(
                 if (s.staleDevices == 0) "All devices checked in within 24 h" else "${s.staleDevices} device(s) not seen in 24 h",
                 style = MaterialTheme.typography.bodySmall,

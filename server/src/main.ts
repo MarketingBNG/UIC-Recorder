@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { cliqSender } from "./alerts/cliq.js";
+import { startAlertLoop } from "./alerts/checks.js";
 import { buildApp } from "./app.js";
 import { createGoogleVerifier } from "./auth/google.js";
 import { DashboardOidc } from "./auth/oidc.js";
@@ -36,7 +38,15 @@ const app = await buildApp(
 
 if (!oidc) app.log.warn("GOOGLE_WEB_CLIENT_SECRET not set: dashboard sign-in disabled");
 
+// Zoho Cliq alerts every 5 minutes; off when CLIQ_WEBHOOK_URL is empty.
+const stopAlerts = config.CLIQ_WEBHOOK_URL
+  ? startAlertLoop(db, storage, cliqSender(config.CLIQ_WEBHOOK_URL, (m) => app.log.warn(m)), (err) =>
+      app.log.error({ err }, "alert checks failed"),
+    )
+  : (app.log.warn("CLIQ_WEBHOOK_URL not set: alerts disabled"), () => {});
+
 const shutdown = async () => {
+  stopAlerts();
   await app.close();
   await db.$disconnect();
   process.exit(0);
