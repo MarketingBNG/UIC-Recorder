@@ -29,7 +29,7 @@ beforeEach(async () => {
 const root = () => t.storage.root;
 
 /** A call with a stored file of `bytes` and `durationS`; 100 KB / 10 s = 80 kbps (worth compressing). */
-async function storedCall(opts: { bytes?: number; durationS?: number; status?: "TRANSCRIBED" | "UPLOADED"; startedAt?: Date } = {}) {
+async function storedCall(opts: { bytes?: number; durationS?: number | null; status?: "TRANSCRIBED" | "UPLOADED"; startedAt?: Date } = {}) {
   const id = randomUUID();
   const audio = randomBytes(opts.bytes ?? 100_000);
   const rel = `${userId}/2026/01/${id}.wav`;
@@ -40,7 +40,7 @@ async function storedCall(opts: { bytes?: number; durationS?: number; status?: "
       id,
       userId,
       startedAt: opts.startedAt ?? new Date(),
-      durationS: opts.durationS ?? 10,
+      durationS: opts.durationS === undefined ? 10 : opts.durationS,
       originalSha256: sha256(audio),
       status: opts.status ?? "TRANSCRIBED",
       filePath: rel,
@@ -63,6 +63,24 @@ const putCompressed = (callId: string, jobId: string, body: Buffer, opts: { work
   });
 
 describe("compress queueing", () => {
+  it("queues calls with no recorded duration only when the file is large", async () => {
+    const big = await storedCall({ bytes: 5_100_000, durationS: null });
+    const zero = await storedCall({ bytes: 5_100_000, durationS: 0 });
+    const small = await storedCall({ bytes: 100_000, durationS: null });
+    expect((await compressionStats(t.db)).eligibleCalls).toBeGreaterThanOrEqual(2);
+    expect(await queueCompressionBackfill(t.db)).toBe(2);
+    expect(await t.db.job.count({ where: { callId: { in: [big.call.id, zero.call.id] }, kind: "compress" } })).toBe(2);
+    expect(await t.db.job.count({ where: { callId: small.call.id } })).toBe(0);
+  });
+
+  it("allows at most one open compress job per call (database-enforced)", async () => {
+    const { call } = await storedCall();
+    expect(await queueCompressionBackfill(t.db)).toBe(1);
+    await expect(
+      t.db.job.create({ data: { callId: call.id, kind: "compress", priority: -1, status: "QUEUED" } }),
+    ).rejects.toThrow();
+  });
+
   it("backfill queues only large, transcribed, uncompressed calls, oldest first, with a limit", async () => {
     const old = await storedCall({ startedAt: new Date("2025-01-01") });
     const newer = await storedCall({ startedAt: new Date("2025-06-01") });
@@ -128,7 +146,7 @@ describe("compressed upload", () => {
     expect(res.json()).toEqual({ oldBytes: 100_000, newBytes: 20_000 });
 
     const after = await t.db.call.findUniqueOrThrow({ where: { id: call.id } });
-    expect(after.filePath).toBe(`${userId}/2026/01/${call.id}-c.m4a`);
+    expect(after.filePath).toBe(`${userId}/2026/01/${call.id}-c-${jobId}.m4a`);
     expect(after.mimeType).toBe("audio/mp4");
     expect(Number(after.fileSize)).toBe(20_000);
     expect(Number(after.bytesSaved)).toBe(80_000);
@@ -151,6 +169,19 @@ describe("compressed upload", () => {
     expect(await queueCompressionBackfill(t.db)).toBe(0);
   });
 
+  it("answers a resend of an already-applied upload (lost response) with success and keeps the file", async () => {
+    const { call, jobId } = await claimed();
+    const small = randomBytes(20_000);
+    expect((await putCompressed(call.id, jobId, small)).statusCode).toBe(200);
+    const again = await putCompressed(call.id, jobId, small);
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toEqual({ oldBytes: 100_000, newBytes: 20_000 });
+    const after = await t.db.call.findUniqueOrThrow({ where: { id: call.id } });
+    expect(existsSync(path.join(root(), after.filePath!))).toBe(true);
+    // A different (stale) job id is still refused.
+    expect((await putCompressed(call.id, randomUUID(), small)).statusCode).toBe(409);
+  });
+
   it("keeps the original when the result is not smaller", async () => {
     const { call, rel, jobId } = await claimed();
     const res = await putCompressed(call.id, jobId, randomBytes(100_000));
@@ -159,7 +190,7 @@ describe("compressed upload", () => {
     expect(after.filePath).toBe(rel);
     expect(after.compressedAt).toBeNull();
     expect(existsSync(path.join(root(), rel))).toBe(true);
-    expect(existsSync(path.join(root(), `${userId}/2026/01/${call.id}-c.m4a`))).toBe(false);
+    expect(existsSync(path.join(root(), `${userId}/2026/01/${call.id}-c-${jobId}.m4a`))).toBe(false);
   });
 
   it("keeps the original on a checksum mismatch, wrong type, or a worker without the lock", async () => {

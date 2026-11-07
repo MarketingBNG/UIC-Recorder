@@ -2,6 +2,10 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Two compress jobs for one call could delete the saved recording (M2b review)
+- **Cause:** both jobs wrote `<callId>-c.m4a`; the losing job's cleanup removed the file the winner had just swapped in.
+- **Fix:** the file is now `<callId>-c-<jobId>.m4a`, a partial unique index allows one open compress job per call, and a resent upload after a lost response returns the earlier result instead of an error.
+
 ## Compressed upload test hung when the file was too big (M2b, local dev)
 - **Cause:** the size limit fired mid-stream and the injected request never got its response.
 - **Fix:** the API rejects a compressed upload whose `Content-Length` is not smaller than the original before reading the body; the stream limit stays as a backstop.

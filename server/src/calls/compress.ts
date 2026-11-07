@@ -8,9 +8,12 @@ const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/);
 
 export const CompressQuery = z.object({ jobId: z.uuid(), workerId: z.string().min(1).max(100) });
 
-/** Compressed audio sits next to the original as <callId>-c.m4a, so the original is never overwritten in place. */
-export function compressedPath(filePath: string, callId: string): string {
-  return path.posix.join(path.posix.dirname(filePath), `${callId}-c.m4a`);
+/**
+ * Compressed audio sits next to the original as <callId>-c-<jobId>.m4a: the original is never overwritten in
+ * place, and the name is unique per job so a failed job can only ever remove its own file.
+ */
+export function compressedPath(filePath: string, callId: string, jobId: string): string {
+  return path.posix.join(path.posix.dirname(filePath), `${callId}-c-${jobId}.m4a`);
 }
 
 /**
@@ -31,18 +34,25 @@ export async function storeCompressedAudio(
   const expected = sha256Hex.safeParse(req.headers["x-content-sha256"]);
   if (!expected.success) throw new HttpError(400, "Missing or invalid X-Content-SHA256");
 
-  const job = await deps.db.job.findFirst({
-    where: { id: q.jobId, callId, kind: "compress", status: "RUNNING", lockedBy: q.workerId },
-  });
-  if (!job) throw new HttpError(409, "Job is not a compress job for this call locked by this worker");
+  const job = await deps.db.job.findFirst({ where: { id: q.jobId, callId, kind: "compress" } });
   const call = await deps.db.call.findUnique({ where: { id: callId } });
+  // A resend after a lost response: this very job already swapped the file in. Answer as before (idempotent).
+  if (job?.status === "DONE" && call?.compressedAt && call.filePath && call.fileSize !== null
+      && call.bytesSaved !== null && path.posix.basename(call.filePath) === `${callId}-c-${job.id}.m4a`) {
+    req.raw.resume();
+    const newBytes = Number(call.fileSize);
+    return { oldBytes: newBytes + Number(call.bytesSaved), newBytes };
+  }
+  if (!job || job.status !== "RUNNING" || job.lockedBy !== q.workerId) {
+    throw new HttpError(409, "Job is not a compress job for this call locked by this worker");
+  }
   if (!call?.filePath || call.fileSize === null) throw new HttpError(404, "No audio");
   if (call.status !== "TRANSCRIBED") throw new HttpError(409, "Call is not transcribed; original kept");
   if (call.compressedAt) throw new HttpError(409, "Call is already compressed");
   const oldPath = call.filePath;
 
   const oldSize = Number(call.fileSize);
-  const rel = compressedPath(oldPath, callId);
+  const rel = compressedPath(oldPath, callId, job.id);
   // Rejected before reading the body when the size is announced (the stream check below is the backstop).
   if (Number(req.headers["content-length"] ?? 0) >= oldSize) {
     throw new HttpError(422, "Compressed file is not smaller; original kept");

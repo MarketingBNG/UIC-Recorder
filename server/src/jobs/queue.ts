@@ -11,6 +11,8 @@ export const JOB_KINDS = ["transcribe", "translate", "compress"] as const;
 export const SIDE_KINDS = ["translate", "compress"] as const;
 /** Stored audio above this bitrate is worth re-encoding (phones upload ~24 kbps AAC). */
 export const COMPRESS_MIN_BPS = 40_000;
+/** Calls with no recorded duration are compressed when bigger than this (~28 min at the phones' 24 kbps). */
+export const COMPRESS_MIN_BYTES_NO_DURATION = 5_000_000;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export interface ClaimedJob {
@@ -265,7 +267,9 @@ type Tx = Parameters<Parameters<Db["$transaction"]>[0]>[0];
 /** SQL filter for calls whose stored audio is worth re-encoding: transcribed, big bitrate, not yet compressed. */
 const compressible = (alias: string) => `
   ${alias}."status" = 'TRANSCRIBED' AND ${alias}."file_path" IS NOT NULL AND ${alias}."compressed_at" IS NULL
-  AND ${alias}."duration_s" > 0 AND ${alias}."file_size" * 8 / ${alias}."duration_s" > ${COMPRESS_MIN_BPS}
+  AND (CASE WHEN COALESCE(${alias}."duration_s", 0) > 0
+            THEN ${alias}."file_size" * 8 / ${alias}."duration_s" > ${COMPRESS_MIN_BPS}
+            ELSE ${alias}."file_size" > ${COMPRESS_MIN_BYTES_NO_DURATION} END)
   AND NOT EXISTS (SELECT 1 FROM "jobs" j WHERE j."call_id" = ${alias}."id" AND j."kind" = 'compress'
                   AND j."status" IN ('QUEUED', 'RUNNING'))`;
 
@@ -274,7 +278,8 @@ export async function queueCompression(tx: Tx | Db, callId: string): Promise<num
   return tx.$executeRawUnsafe(
     `INSERT INTO "jobs" ("id", "call_id", "kind", "priority", "status", "attempts", "run_after", "created_at", "updated_at")
      SELECT gen_random_uuid(), c."id", 'compress', -1, 'QUEUED', 0, now(), now(), now()
-     FROM "calls" c WHERE c."id" = $1::uuid AND ${compressible("c")}`,
+     FROM "calls" c WHERE c."id" = $1::uuid AND ${compressible("c")}
+     ON CONFLICT DO NOTHING`,
     callId,
   );
 }
@@ -285,7 +290,8 @@ export async function queueCompressionBackfill(db: Db, limit?: number): Promise<
     `INSERT INTO "jobs" ("id", "call_id", "kind", "priority", "status", "attempts", "run_after", "created_at", "updated_at")
      SELECT gen_random_uuid(), c."id", 'compress', -1, 'QUEUED', 0, now(), now(), now()
      FROM (SELECT c."id" FROM "calls" c WHERE ${compressible("c")} ORDER BY c."started_at" ASC
-           ${limit ? "LIMIT $1" : ""}) c`,
+           ${limit ? "LIMIT $1" : ""}) c
+     ON CONFLICT DO NOTHING`,
     ...(limit ? [limit] : []),
   );
 }
