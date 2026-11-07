@@ -127,7 +127,17 @@ class ApiClient(
     suspend fun heartbeat(req: HeartbeatRequest) = postUnit("/v1/device/heartbeat", req)
 
     /** Business-only mode: hashed client-list numbers (never the numbers themselves). */
-    suspend fun clientNumberHashes(): ClientNumberHashes = get("/v1/device/client-numbers")
+    /** Returns null when the server says the list is unchanged since [etag] (304), else the list and its ETag. */
+    suspend fun clientNumberHashes(etag: String? = null): Pair<ClientNumberHashes, String?>? {
+        val req = Request.Builder().url(url("/v1/device/client-numbers")).apply { if (etag != null) header("If-None-Match", etag) }.build()
+        return http.newCall(req).await().use { res ->
+            when {
+                res.code == 304 -> null
+                !res.isSuccessful -> throw res.toApiException()
+                else -> json.decodeFromString<ClientNumberHashes>(res.body.string()) to res.header("ETag")
+            }
+        }
+    }
     suspend fun latestApp(): LatestApp = get("/v1/app/latest")
 
     /** Streams the published APK to [dest]. Verify LatestApp.sha256 before installing. */

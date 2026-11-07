@@ -66,16 +66,33 @@ export async function runRetention(db: Db, storage: LocalStorage, now = new Date
   return { deleted, bytes };
 }
 
-/** Daily retention run (first one a minute after start). Returns a stop function. */
+const LAST_RUN_KEY = "retention:last_run";
+const CHECK_INTERVAL_MS = 3600_000;
+
+/**
+ * Claims today's run: true at most once per RETENTION_INTERVAL_MS across restarts and server instances
+ * (last run time kept in alert_states.last_sent_at; the conditional update is the lock).
+ */
+export async function claimRetentionRun(db: Db, now = new Date()): Promise<boolean> {
+  await db.alertState.createMany({ data: [{ key: LAST_RUN_KEY }], skipDuplicates: true });
+  const r = await db.alertState.updateMany({
+    where: { key: LAST_RUN_KEY, OR: [{ lastSentAt: null }, { lastSentAt: { lte: new Date(now.getTime() - RETENTION_INTERVAL_MS) } }] },
+    data: { lastSentAt: now },
+  });
+  return r.count === 1;
+}
+
+/** Checks hourly (first a minute after start) and runs retention once a day. Returns a stop function. */
 export function startRetentionLoop(db: Db, storage: LocalStorage, onError: (err: unknown) => void, onDeleted: (r: { deleted: number; bytes: number }) => void) {
   const tick = () =>
-    runRetention(db, storage)
+    claimRetentionRun(db)
+      .then((claimed) => (claimed ? runRetention(db, storage) : null))
       .then((r) => {
         if (r && r.deleted > 0) onDeleted(r);
       })
       .catch(onError);
   const first = setTimeout(tick, 60_000);
-  const timer = setInterval(tick, RETENTION_INTERVAL_MS);
+  const timer = setInterval(tick, CHECK_INTERVAL_MS);
   return () => {
     clearTimeout(first);
     clearInterval(timer);

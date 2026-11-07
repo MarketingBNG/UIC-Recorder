@@ -19,6 +19,7 @@ private val Context.configStore by preferencesDataStore("device_config")
 class DeviceConfigRepository(private val context: Context, private val api: ApiClient, private val clients: ClientHashDao) {
     private val keyJson = stringPreferencesKey("json")
     private val keyFetchedAt = longPreferencesKey("fetched_at")
+    private val keyClientEtag = stringPreferencesKey("client_list_etag")
 
     /** Last fetched config, or defaults before the first fetch. */
     val config: Flow<DeviceConfig> = context.configStore.data.map { p ->
@@ -37,7 +38,12 @@ class DeviceConfigRepository(private val context: Context, private val api: ApiC
         // Business-only mode: refresh the hashed client list with the config. On failure the old list stays.
         if (cfg.businessOnly) {
             try {
-                clients.replaceAll(api.clientNumberHashes().hashes)
+                // ETag: an unchanged list answers 304 instead of re-sending every hash.
+                val etag = if (clients.loaded()) context.configStore.data.first()[keyClientEtag] else null
+                api.clientNumberHashes(etag)?.let { (list, newEtag) ->
+                    clients.replaceAll(list.hashes)
+                    context.configStore.edit { p -> if (newEtag != null) p[keyClientEtag] = newEtag else p.remove(keyClientEtag) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -50,7 +56,9 @@ class DeviceConfigRepository(private val context: Context, private val api: ApiC
     /** Refreshes when the cache is older than [maxAgeMs]; falls back to the cache on network errors. */
     suspend fun refreshIfStale(maxAgeMs: Long = 6 * 3600_000L): DeviceConfig {
         val fetchedAt = context.configStore.data.first()[keyFetchedAt] ?: 0
-        if (System.currentTimeMillis() - fetchedAt < maxAgeMs) return current()
+        val fresh = System.currentTimeMillis() - fetchedAt < maxAgeMs
+        // Business-only without a client list holds saved-contact calls, so don't wait out the cache age.
+        if (fresh && !(current().businessOnly && !clients.loaded())) return current()
         return runCatching { refresh() }.getOrElse { current() }
     }
 }

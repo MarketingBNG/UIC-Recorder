@@ -39,8 +39,9 @@ def luhn_ok(digits: str) -> bool:
     return total % 10 == 0
 
 
-# 13-19 digits, optionally grouped with single spaces or hyphens.
-_CARD = re.compile(r"(?<![\d+])\d(?:[ -]?\d){12,18}(?!\d)")
+# 13-19 digits, plain or grouped 4-4-4-rest with one repeated separator (so a phone number followed by
+# another short number, e.g. "9876543210 12345", is never joined into a card-like run).
+_CARD = re.compile(r"(?<![\d+])\d{4}([ -]?)\d{4}\1\d{4}\1\d{1,7}(?!\d)")
 # 12 digits, first 2-9, plain or grouped 4-4-4 with the same separator.
 _AADHAAR = re.compile(r"(?<![\d+])[2-9]\d{3}([ -]?)\d{4}\1\d{4}(?!\d)")
 # "+91" or "91" followed by a 10-digit Indian mobile: a phone number, not an Aadhaar.

@@ -117,6 +117,9 @@ export async function firefliesRoutes(app: FastifyInstance, deps: Deps) {
         });
       }
       await saveFirefliesState(tx, next);
+      await tx.auditLog.create({
+        data: { userId: req.user?.id ?? null, action: "SETTINGS_CHANGE", detail: { fireflies: { ...patch, clearBlock } }, ip: req.ip },
+      });
       // Raising the batch gate or budget, or re-enabling, should not leave jobs parked for an hour.
       if (patch.approvedBacklogCount !== undefined || patch.budgetMinutes !== undefined || patch.enabled || patch.liveReservePct !== undefined) {
         await tx.job.updateMany({ where: { status: "WAITING_BUDGET", runAfter: { gt: new Date() } }, data: { runAfter: new Date() } });

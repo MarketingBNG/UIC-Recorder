@@ -110,7 +110,7 @@ The API checks every 5 minutes and posts to a Zoho Cliq channel when something b
 ## Privacy settings (Milestone 3)
 All off by default; nothing to set to keep today's behaviour. See `docs/privacy.md`.
 
-1. Optional: on `uic-api`, `UPLOAD_RATE_PER_HOUR` (default `600`) caps audio uploads per phone per hour. Extra uploads get HTTP 429 and the app retries later without counting it as a failure.
+1. Optional: on `uic-api`, `UPLOAD_RATE_PER_HOUR` (default `600`) caps audio uploads per phone per hour. Extra uploads get HTTP 429 and the app retries later without counting it as a failure. The counter is in memory: it assumes one `uic-api` instance and resets on restart. (Retention, by contrast, records its last run in the database, so it runs once a day however many instances or restarts.)
 2. Settings page → **Client list** (admin): add numbers or import a CSV (one number per line, optional label after a comma). Used only when **Business calls only** is on.
 3. Settings page → **Privacy** (admin): **Keep recordings forever** (default on). Turning it off and setting N months makes the API delete audio files of calls older than N months once a day; transcripts stay. **Mask Aadhaar and card numbers** (default off) applies to new transcripts only.
 4. The **Audit log** page (admin) lists plays, downloads, searches, deletions and settings changes.

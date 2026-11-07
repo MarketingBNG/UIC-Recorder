@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Two retention claims at once failed with a unique-key error (M3 review fixes)
+- **Cause:** Prisma `upsert` is not atomic; two concurrent calls both tried to insert the `retention:last_run` row.
+- **Fix:** create the row with `createMany({ skipDuplicates: true })`, then claim with a conditional `updateMany`.
+
+## Test Postgres would not start after a test run was stopped mid-way (M3 review fixes)
+- **Cause:** stopping `npm test` left an orphan test `postgres.exe` (an `io_worker` of `.pgtest`) holding shared memory.
+- **Fix:** killed only the orphan process whose parent was gone; left the dev database (`.pgdata`) running.
+
 ## New Android file under `data/db/` was not picked up by git (M3)
 - **Cause:** the root `.gitignore` rule `data/` (meant for server recordings) also matches the app's `data` package.
 - **Fix:** added `ClientHash.kt` with `git add -f`; check `git status` for new files under `.../uicrecorder/data/`.

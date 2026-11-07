@@ -237,7 +237,11 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
   return db.$transaction(async (tx) => {
     const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId } });
     if (!job) return false;
-    const giveUp = !retryable || job.attempts >= MAX_ATTEMPTS;
+    // Retention removed the audio (possibly right after this job was claimed): retrying can't help,
+    // and the call keeps its status (its transcript, if any, stays).
+    const call = await tx.call.findUnique({ where: { id: job.callId }, select: { audioDeletedAt: true } });
+    const audioGone = call?.audioDeletedAt != null;
+    const giveUp = !retryable || audioGone || job.attempts >= MAX_ATTEMPTS;
     const backoffMs = 2 ** job.attempts * 60_000;
     await tx.job.update({
       where: { id: job.id },
@@ -253,7 +257,7 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
       },
     });
     // Translate / compress jobs never change the call: it stays TRANSCRIBED (a failed compression keeps the original).
-    if (job.kind === "transcribe") {
+    if (job.kind === "transcribe" && !audioGone) {
       await tx.call.update({ where: { id: job.callId }, data: { status: giveUp ? "FAILED" : "UPLOADED" } });
     }
     return true;

@@ -4,9 +4,10 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { hashKey, numberKey, parseClientCsv } from "../src/privacy/clientNumbers.js";
-import { retentionCutoff, runRetention } from "../src/privacy/retention.js";
+import { claimRetentionRun, retentionCutoff, runRetention } from "../src/privacy/retention.js";
 import { DEFAULT_PRIVACY_SETTINGS, getPrivacySettings, savePrivacySettings } from "../src/privacy/settings.js";
 import { WindowLimiter } from "../src/privacy/uploadLimit.js";
+import { failJob } from "../src/jobs/queue.js";
 import { setupTestApp, sha256, uniqueEmail } from "./helpers.js";
 
 let t: Awaited<ReturnType<typeof setupTestApp>>;
@@ -69,13 +70,19 @@ describe("client list API", () => {
     expect(items.find((i) => i.raw === "+91 90000 11111")?.label).toBe("Renamed");
 
     const phone = await t.loginDevice(uniqueEmail("cn"));
-    const hashes = (await t.app.inject({ method: "GET", url: "/v1/device/client-numbers", headers: phone.headers })).json().hashes;
+    const first = await t.app.inject({ method: "GET", url: "/v1/device/client-numbers", headers: phone.headers });
+    const hashes = first.json().hashes;
+    const etag = first.headers.etag as string;
+    const same = await t.app.inject({ method: "GET", url: "/v1/device/client-numbers", headers: { ...phone.headers, "if-none-match": etag } });
+    expect(same.statusCode).toBe(304);
     expect(hashes).toContain(hashKey("9000011111"));
     expect(hashes).toContain(hashKey("9000022222"));
     expect(JSON.stringify(hashes)).not.toContain("9000011111");
 
     const id = (list.json().items as { id: string; raw: string }[]).find((i) => i.raw === "+91 90000 22222")!.id;
     expect((await t.app.inject({ method: "DELETE", url: `/api/client-numbers/${id}`, headers: h })).statusCode).toBe(204);
+    const changed = await t.app.inject({ method: "GET", url: "/v1/device/client-numbers", headers: { ...phone.headers, "if-none-match": etag } });
+    expect(changed.statusCode).toBe(200);
     const audit = await t.db.auditLog.count({ where: { action: "CLIENT_LIST_CHANGE" } });
     expect(audit).toBeGreaterThanOrEqual(3);
   });
@@ -95,6 +102,9 @@ describe("privacy settings", () => {
     expect((await t.app.inject({ method: "GET", url: "/api/settings/privacy", headers: h })).json()).toEqual({ retentionMonths: null, maskPii: false });
     const put = await t.app.inject({ method: "PUT", url: "/api/settings/privacy", headers: h, payload: { maskPii: true } });
     expect(put.json()).toEqual({ retentionMonths: null, maskPii: true });
+    const before = await t.db.auditLog.count({ where: { action: "SETTINGS_CHANGE" } });
+    await t.app.inject({ method: "PUT", url: "/api/settings/costs", headers: h, payload: {} });
+    expect(await t.db.auditLog.count({ where: { action: "SETTINGS_CHANGE" } })).toBe(before + 1);
     expect(await t.db.auditLog.count({ where: { action: "SETTINGS_CHANGE" } })).toBeGreaterThan(0);
     const bad = await t.app.inject({ method: "PUT", url: "/api/settings/privacy", headers: h, payload: { retentionMonths: 0 } });
     expect(bad.statusCode).toBe(400);
@@ -181,6 +191,24 @@ describe("retention", () => {
     });
     expect(again.json()).toMatchObject({ callId: old.call.id, alreadyUploaded: true });
     await savePrivacySettings(t.db, DEFAULT_PRIVACY_SETTINGS);
+  });
+
+  it("runs at most once a day across restarts and instances", async () => {
+    await t.db.alertState.deleteMany({ where: { key: "retention:last_run" } });
+    const now = new Date("2026-11-07T00:00:00Z");
+    const claims = await Promise.all([claimRetentionRun(t.db, now), claimRetentionRun(t.db, now)]);
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(await claimRetentionRun(t.db, new Date("2026-11-07T23:00:00Z"))).toBe(false);
+    expect(await claimRetentionRun(t.db, new Date("2026-11-08T00:00:00Z"))).toBe(true);
+  });
+
+  it("a job whose audio retention removed fails at once and leaves the call alone", async () => {
+    const { call } = await storedCall(new Date("2026-01-01T00:00:00Z"));
+    await t.db.call.update({ where: { id: call.id }, data: { filePath: null, fileSize: null, audioDeletedAt: new Date() } });
+    const job = await t.db.job.create({ data: { callId: call.id, kind: "transcribe", status: "RUNNING", lockedBy: "w1", attempts: 1 } });
+    expect(await failJob(t.db, job.id, "w1", "No audio", true)).toBe(true);
+    expect((await t.db.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("FAILED");
+    expect((await t.db.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe("TRANSCRIBED");
   });
 });
 

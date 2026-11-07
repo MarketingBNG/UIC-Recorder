@@ -284,6 +284,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const current = await getCostSettings(deps.db);
     await saveCostSettings(deps.db, { ...current, ...patch });
     req.log.info({ patch, by: currentUser(req).id }, "cost settings changed");
+    await audit(req, "SETTINGS_CHANGE", undefined, { costs: patch });
     return translationUsage(deps.db);
   });
 
@@ -362,6 +363,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   app.put("/api/settings/device-config", admins, async (req) => {
     const deviceConfig = DeviceConfig.parse(req.body);
     await deps.db.setting.upsert({ where: { id: 1 }, create: { id: 1, deviceConfig }, update: { deviceConfig } });
+    await audit(req, "SETTINGS_CHANGE", undefined, { deviceConfig });
     return deviceConfig;
   });
 

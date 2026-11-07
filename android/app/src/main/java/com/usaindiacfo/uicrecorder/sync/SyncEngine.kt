@@ -131,7 +131,14 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
         // Decided at upload time so client-list and contact changes apply to recordings found earlier.
         when (val d = PrivacyFilter.decide(r.phone, cfg, contacts)) {
             is PrivacyDecision.Skip -> { dao.setStatus(r.id, RecordingStatus.SKIPPED, d.reason); return UploadOutcome.DONE }
-            is PrivacyDecision.Hold -> { dao.setStatus(r.id, RecordingStatus.PENDING, d.reason); stopRun = true; return UploadOutcome.RETRY }
+            is PrivacyDecision.Hold -> {
+                dao.setStatus(r.id, RecordingStatus.PENDING, d.reason)
+                // A missing Contacts permission holds every saved-contact call, so end the run. A missing client
+                // list only holds this call; others (unknown numbers) still upload, and the list is re-fetched on
+                // the next run (DeviceConfigRepository.refreshIfStale).
+                if (d.reason != PrivacyFilter.NEED_CLIENT_LIST) stopRun = true
+                return UploadOutcome.RETRY
+            }
             PrivacyDecision.Upload -> Unit
         }
         val sha = r.sha256 ?: hash(r) ?: return UploadOutcome.DONE

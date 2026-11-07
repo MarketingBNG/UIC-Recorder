@@ -32,6 +32,12 @@ def test_masks_cards_keeping_last_four():
     assert mask_text("4111 1111 1111 1111") == "[card XXXX 1111]"
 
 
+def test_phone_followed_by_a_short_number_is_not_a_card():
+    # "987654321012347" passes Luhn, but a 10-digit phone plus a separate number is not 4-4-4 grouped.
+    assert mask_text("call 9876543210 12347 now") == "call 9876543210 12347 now"
+    assert mask_text("9876543210-12347") == "9876543210-12347"
+
+
 def test_leaves_phone_numbers_amounts_and_failing_checksums():
     # 91 + mobile number that happens to pass Verhoeff.
     assert verhoeff_ok("919876543216")

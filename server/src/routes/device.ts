@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
 import path from "node:path";
@@ -28,8 +29,12 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
    * Business-only mode: sha256 of each client-list number key (last 10 digits), never the numbers themselves.
    * The phone uploads a call to a saved personal contact only when its number's hash is in this list.
    */
-  app.get("/v1/device/client-numbers", auth, async () => {
+  /** ETag = sha256 of the sorted keys, so an unchanged list answers 304 instead of up to ~13 MB of JSON. */
+  app.get("/v1/device/client-numbers", auth, async (req, reply) => {
     const rows = await deps.db.clientNumber.findMany({ select: { key: true }, orderBy: { key: "asc" } });
+    const etag = `"${createHash("sha256").update(rows.map((r) => r.key).join(",")).digest("hex")}"`;
+    reply.header("etag", etag);
+    if (req.headers["if-none-match"] === etag) return reply.code(304).send();
     return { hashes: rows.map((r) => hashKey(r.key)) };
   });
 
