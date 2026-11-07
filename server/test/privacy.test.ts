@@ -166,6 +166,20 @@ describe("retention", () => {
 
     const h = await asAdmin();
     expect((await t.app.inject({ method: "GET", url: `/api/calls/${old.call.id}/audio`, headers: h })).statusCode).toBe(404);
+
+    // Phones must still see the call as uploaded, or they would re-upload (and re-transcribe) deleted audio.
+    const phone = await t.loginDevice(uniqueEmail("ret"));
+    const owner = await t.db.user.findUniqueOrThrow({ where: { email: phone.user.email } });
+    await t.db.call.update({ where: { id: old.call.id }, data: { userId: owner.id } });
+    const check = await t.app.inject({ method: "POST", url: "/v1/calls/check", headers: phone.headers, payload: { hashes: [old.call.originalSha256] } });
+    expect(check.json().known).toEqual([old.call.originalSha256]);
+    const again = await t.app.inject({
+      method: "POST",
+      url: "/v1/calls",
+      headers: phone.headers,
+      payload: { originalSha256: old.call.originalSha256, startedAt: old.call.startedAt.toISOString() },
+    });
+    expect(again.json()).toMatchObject({ callId: old.call.id, alreadyUploaded: true });
     await savePrivacySettings(t.db, DEFAULT_PRIVACY_SETTINGS);
   });
 });

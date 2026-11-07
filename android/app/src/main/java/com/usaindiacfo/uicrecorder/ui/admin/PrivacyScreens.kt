@@ -180,7 +180,7 @@ fun ClientListScreen() {
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Client list", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "With \"Business calls only\" on, phones skip calls with numbers saved as personal contacts, unless the number is here. Phones only download hashed numbers.",
+                            "With \"Business calls only\" on, phones skip calls with numbers saved as personal contacts, unless the number is here. Phones get the list as hashes, which hides it from casual view only.",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         OutlinedTextField(number, { number = it }, label = { Text("Phone number") }, singleLine = true,

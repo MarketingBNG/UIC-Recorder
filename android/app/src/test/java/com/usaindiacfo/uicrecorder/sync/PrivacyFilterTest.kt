@@ -7,13 +7,14 @@ import org.junit.Test
 
 class PrivacyFilterTest {
     /** Fake lookups: [contacts] null = Contacts permission missing. */
-    private class Fake(val contacts: Set<String>?, val clientNumbers: Set<String> = emptySet()) : ContactCheck {
+    private class Fake(val contacts: Set<String>?, val clientNumbers: Set<String> = emptySet(), val loaded: Boolean = true) : ContactCheck {
         val asked = mutableListOf<String>()
         override suspend fun isSavedContact(phone: String): Boolean? {
             asked += phone
             return contacts?.any { PrivacyFilter.key(it) == PrivacyFilter.key(phone) }
         }
         override suspend fun isClientHash(hash: String) = clientNumbers.any { PrivacyFilter.hashKey(PrivacyFilter.key(it)) == hash }
+        override suspend fun clientListLoaded() = loaded
     }
 
     private val business = DeviceConfig(businessOnly = true)
@@ -58,5 +59,12 @@ class PrivacyFilterTest {
     @Test fun excludedWinsOverClientList() {
         val cfg = business.copy(excludedNumbers = listOf("9876543210"))
         assertEquals(PrivacyDecision.Skip(PrivacyFilter.EXCLUDED), decide("9876543210", cfg, Fake(emptySet(), setOf("9876543210"))))
+    }
+
+    @Test fun savedContactsWaitUntilTheClientListHasDownloaded() {
+        // Skipping is final: a client saved as a contact must not be lost because the list never arrived.
+        val f = Fake(contacts = setOf("9876543210"), loaded = false)
+        assertEquals(PrivacyDecision.Hold(PrivacyFilter.NEED_CLIENT_LIST), decide("9876543210", business, f))
+        assertEquals(PrivacyDecision.Upload, decide("9123456780", business, f)) // not a contact: no need to wait
     }
 }

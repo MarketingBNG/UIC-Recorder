@@ -28,4 +28,6 @@ class AndroidContactCheck(private val context: Context, private val clients: Cli
     }
 
     override suspend fun isClientHash(hash: String): Boolean = clients.contains(hash)
+
+    override suspend fun clientListLoaded(): Boolean = clients.loaded()
 }

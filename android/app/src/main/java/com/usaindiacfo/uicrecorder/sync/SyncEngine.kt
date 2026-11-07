@@ -42,6 +42,9 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     private val prefs = SyncPrefs(context)
     private val contacts: ContactCheck by lazy { AndroidContactCheck(context, c.db.clientHashes()) }
 
+    /** Set by a phone-wide stop (server 429, missing Contacts permission): end this run, WorkManager retries later. */
+    @Volatile private var stopRun = false
+
     data class ScanResult(val inserted: Int, val deferred: Boolean)
 
     /** Finds files since [sinceMs], matches them to CallLog and stores new ones. Files still being written are deferred. */
@@ -111,7 +114,8 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
         val parallel = if (c.isLowRamDevice) 1 else cfg.maxParallelUploads.coerceIn(1, 4)
         val tried = HashSet<Long>()
         var outcome = UploadOutcome.DONE
-        while (!isStopped()) {
+        stopRun = false
+        while (!isStopped() && !stopRun) {
             val batch = dao.nextPending(source, parallel + tried.size).filter { it.id !in tried }.take(parallel)
             if (batch.isEmpty()) break
             val results = coroutineScope { batch.map { async { uploadOne(it, cfg) } }.awaitAll() }
@@ -127,7 +131,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
         // Decided at upload time so client-list and contact changes apply to recordings found earlier.
         when (val d = PrivacyFilter.decide(r.phone, cfg, contacts)) {
             is PrivacyDecision.Skip -> { dao.setStatus(r.id, RecordingStatus.SKIPPED, d.reason); return UploadOutcome.DONE }
-            is PrivacyDecision.Hold -> { dao.setStatus(r.id, RecordingStatus.PENDING, d.reason); return UploadOutcome.RETRY }
+            is PrivacyDecision.Hold -> { dao.setStatus(r.id, RecordingStatus.PENDING, d.reason); stopRun = true; return UploadOutcome.RETRY }
             PrivacyDecision.Upload -> Unit
         }
         val sha = r.sha256 ?: hash(r) ?: return UploadOutcome.DONE
@@ -165,7 +169,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
                 e.isAuth -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.SIGNED_OUT }
                 e.code == 413 || e.code == 415 -> { dao.setStatus(r.id, RecordingStatus.SKIPPED, e.message); UploadOutcome.DONE }
                 // Server upload rate limit: like network trouble, don't burn an attempt.
-                e.code == 429 -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.RETRY }
+                e.code == 429 -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
                 else -> { dao.markFailed(r.id, e.message); UploadOutcome.RETRY }
             }
         } catch (e: FileNotFoundException) {

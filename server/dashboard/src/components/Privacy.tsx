@@ -147,8 +147,8 @@ export function ClientListPanel() {
     <section className="card mt-4 p-4 sm:p-6">
       <h2 className="font-semibold">Client list</h2>
       <p className="hint">
-        With "Business calls only" on, phones skip calls with numbers saved as personal contacts, unless the number is on this list. Phones only download
-        hashed numbers.
+        With "Business calls only" on, phones skip calls with numbers saved as personal contacts, unless the number is on this list. Phones get the list
+        as hashes, which hides it from casual view only.
       </p>
       <form
         className="mt-3 flex flex-wrap items-end gap-2"

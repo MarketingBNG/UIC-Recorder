@@ -10,6 +10,9 @@ interface ContactCheck {
 
     /** True if [hash] (see [PrivacyFilter.hashKey]) is on the server's client list. */
     suspend fun isClientHash(hash: String): Boolean
+
+    /** True once the client list has been downloaded at least once (an empty list is a valid list). */
+    suspend fun clientListLoaded(): Boolean
 }
 
 sealed interface PrivacyDecision {
@@ -25,6 +28,7 @@ object PrivacyFilter {
     const val EXCLUDED = "Excluded number"
     const val PERSONAL = "Personal contact (business-only mode)"
     const val NEED_CONTACTS = "Waiting for Contacts permission (business-only mode)"
+    const val NEED_CLIENT_LIST = "Waiting for the client list (business-only mode)"
 
     /** Digits only; numbers with 10+ digits compare on their last 10 so "+91 98765 43210" == "098765-43210". */
     fun key(number: String): String {
@@ -60,7 +64,8 @@ object PrivacyFilter {
         if (contacts.isClientHash(hashKey(k))) return PrivacyDecision.Upload
         return when (contacts.isSavedContact(phone)) {
             null -> PrivacyDecision.Hold(NEED_CONTACTS)
-            true -> PrivacyDecision.Skip(PERSONAL)
+            // Skipping is final, so never skip a saved contact before the client list has arrived.
+            true -> if (contacts.clientListLoaded()) PrivacyDecision.Skip(PERSONAL) else PrivacyDecision.Hold(NEED_CLIENT_LIST)
             false -> PrivacyDecision.Upload
         }
     }

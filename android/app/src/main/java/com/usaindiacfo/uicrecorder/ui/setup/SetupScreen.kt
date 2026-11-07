@@ -77,7 +77,13 @@ fun SetupScreen(onDone: () -> Unit) {
     val scanning by SetupPrefs.scanning.collectAsState()
     LaunchedEffect(requiredOk, discovery.ran) { if (requiredOk && !discovery.ran) SetupPrefs.startDiscovery(context, config.recorderFolders) }
 
-    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { tick++ }
+    val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        tick++
+        // Business-only recordings held for the Contacts permission can go now instead of after the retry backoff.
+        if (config.businessOnly && result[android.Manifest.permission.READ_CONTACTS] == true) {
+            com.usaindiacfo.uicrecorder.sync.SyncScheduler.syncNow(context)
+        }
+    }
     val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) scope.launch {
             runCatching {

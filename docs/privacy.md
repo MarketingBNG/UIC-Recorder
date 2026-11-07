@@ -27,7 +27,7 @@ All of these default to off (the owner's decision) unless noted.
 
 - **Business calls only** (Settings, device sync): phones skip calls with numbers saved in the phone's contacts, unless the number is on the **client list**. Numbers not saved in contacts and hidden numbers still upload.
   - The phone needs the Contacts permission. Without it, those calls wait.
-  - Phones only download a hash of each client number, never the list itself in clear text.
+  - Phones download an unsalted SHA-256 hash of each client number instead of the number. This hides the list from casual view only: a 10-digit number's hash can be reversed by trying every number in minutes, so any signed-in phone could recover the list. Treat the client list as visible to staff.
   - The decision is made when a recording uploads, so client-list changes apply to recordings still waiting.
   - A call skipped this way is never uploaded.
 - **Excluded numbers** (per user, Users page): never uploaded. This is on whenever numbers are listed.

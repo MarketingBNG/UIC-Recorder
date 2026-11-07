@@ -8,6 +8,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.usaindiacfo.uicrecorder.data.api.ApiClient
 import com.usaindiacfo.uicrecorder.data.api.DeviceConfig
 import com.usaindiacfo.uicrecorder.data.db.ClientHashDao
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -34,7 +35,15 @@ class DeviceConfigRepository(private val context: Context, private val api: ApiC
             it[keyFetchedAt] = System.currentTimeMillis()
         }
         // Business-only mode: refresh the hashed client list with the config. On failure the old list stays.
-        if (cfg.businessOnly) runCatching { clients.replaceAll(api.clientNumberHashes().hashes) }
+        if (cfg.businessOnly) {
+            try {
+                clients.replaceAll(api.clientNumberHashes().hashes)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Keep the old list; until one download succeeds, saved contacts are held, not skipped.
+            }
+        }
         return cfg
     }
 
