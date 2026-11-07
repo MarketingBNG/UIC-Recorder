@@ -137,6 +137,9 @@ model Call {
   fileSize       BigInt?       @map("file_size")
   status         CallStatus    @default(PENDING_UPLOAD)
   uploadedAt     DateTime?     @map("uploaded_at")
+  // Set when the worker re-encoded the stored audio to small AAC (Milestone 2b); bytes freed on disk.
+  compressedAt   DateTime?     @map("compressed_at")
+  bytesSaved     BigInt?       @map("bytes_saved")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 

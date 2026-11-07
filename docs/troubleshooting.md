@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Compressed upload test hung when the file was too big (M2b, local dev)
+- **Cause:** the size limit fired mid-stream and the injected request never got its response.
+- **Fix:** the API rejects a compressed upload whose `Content-Length` is not smaller than the original before reading the body; the stream limit stays as a backstop.
+
+## Bash heredoc edits silently did nothing (M2b, local dev)
+- **Cause:** a long heredoc with TypeScript template strings broke the shell's quote parsing, so no file was written.
+- **Fix:** wrote new files with the editor tool and ran edit scripts from a file.
+
 ## Sarvam transcripts came out one word per line (M2 review)
 - **Cause:** each Sarvam word timestamp became its own segment, and the text was joined from segments, so Claude translated word by word.
 - **Fix:** one segment per 25 s chunk (word times kept under `words`), text from the chunk transcripts.

@@ -129,6 +129,25 @@ class ApiClientTest {
         assertEquals("/api/admin/translate-backfill", req.url.encodedPath)
     }
 
+    @Test fun compressBackfillSendsLimit() = runBlocking {
+        server.enqueue(json(200, """{"queued":5}"""))
+        assertEquals(5, api.compressBackfill(5).queued)
+        val req = server.takeRequest()
+        assertEquals("/api/admin/compress-backfill", req.url.encodedPath)
+        assertEquals("""{"limit":5}""", req.body?.utf8())
+        server.enqueue(json(200, """{"queued":0}"""))
+        api.compressBackfill()
+        assertEquals("{}", server.takeRequest().body?.utf8())
+    }
+
+    @Test fun statsDecodesCompression() = runBlocking {
+        server.enqueue(json(200, """{"calls":{},"jobs":{},"disk":{"totalBytes":10,"freeBytes":5,"usedPct":50},"staleDevices":0,
+            "compression":{"compressedCalls":4,"bytesSaved":5000000000,"eligibleCalls":10,"queuedJobs":1}}"""))
+        val c = api.stats().compression!!
+        assertEquals(5_000_000_000L, c.bytesSaved)
+        assertEquals(10, c.eligibleCalls)
+    }
+
     @Test fun statsDecodesThroughput() = runBlocking {
         server.enqueue(json(200, """{"calls":{},"jobs":{},"disk":{"totalBytes":10,"freeBytes":5,"usedPct":50},"staleDevices":0,
             "alertsEnabled":true,"throughput":{"jobsPerHour":12.5,"doneLastHour":10,"failureRatePct":2.1,"failureRatePctLastHour":0,

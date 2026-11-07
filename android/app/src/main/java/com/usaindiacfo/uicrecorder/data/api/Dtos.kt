@@ -226,6 +226,17 @@ data class Stats(
     val alertsEnabled: Boolean? = null,
     /** Absent on servers before cost tracking (M2). */
     val translation: TranslationStats? = null,
+    /** Absent on servers before recording compression (M2b). */
+    val compression: CompressionStats? = null,
+)
+
+/** Disk freed by re-encoding old recordings; eligible = large transcribed recordings not done or queued yet. */
+@Serializable
+data class CompressionStats(
+    val compressedCalls: Int = 0,
+    val bytesSaved: Long = 0,
+    val eligibleCalls: Int = 0,
+    val queuedJobs: Int = 0,
 )
 
 // ---- Claude translation spend (/api/translation/usage, PUT /api/settings/costs) ----

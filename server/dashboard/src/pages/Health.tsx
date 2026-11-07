@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type CallStatus, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
+import { api, type CallStatus, type CompressionStats, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
 import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
@@ -57,6 +57,7 @@ export function HealthPage() {
       <FirefliesPanel />
       <TranslationPanel />
       {isAdmin && <TranslateBackfill />}
+      {isAdmin && stats.data?.compression && <CompressBackfill c={stats.data.compression} />}
       {isAdmin && <TestAlert enabled={stats.data?.alertsEnabled} />}
 
       {devices.isPending ? (
@@ -185,6 +186,14 @@ function StatsHeader({ s }: { s: Stats }) {
               <span>{formatBytes(s.disk.totalBytes)}</span>
             </div>
             <meter className="mt-2 w-full" min={0} max={100} low={70} high={85} optimum={0} value={s.disk.usedPct} aria-label="Disk used" />
+            {s.compression && (
+              <div className="mt-2 flex justify-between">
+                <span>Saved by compression</span>
+                <span>
+                  {formatBytes(s.compression.bytesSaved)} ({s.compression.compressedCalls} calls)
+                </span>
+              </div>
+            )}
           </div>
         </div>
       </details>
@@ -263,6 +272,43 @@ function TranslateBackfill() {
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} transcript${run.data.queued === 1 ? "" : "s"} for translation.` : "Nothing to queue: every transcript is translated or already queued.")}
+      </p>
+      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
+    </section>
+  );
+}
+
+/** Admin: re-encode large old recordings to the phones' small AAC format (after transcription only). */
+function CompressBackfill({ c }: { c: CompressionStats }) {
+  const qc = useQueryClient();
+  const run = useMutation({
+    mutationFn: (limit?: number) =>
+      api<TranslateBackfillResult>("/api/admin/compress-backfill", { method: "POST", body: limit ? { limit } : {} }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["stats"] }),
+  });
+  return (
+    <section aria-labelledby="compress-h" className="card mb-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="compress-h" className="font-semibold">
+            Compress old recordings
+          </h2>
+          <p className="text-sm text-slate-500">
+            Saved {formatBytes(c.bytesSaved)} on {c.compressedCalls} calls. {c.eligibleCalls} large transcribed recordings left
+            {c.queuedJobs ? `, ${c.queuedJobs} queued` : ""}. The original is kept if anything fails.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate(5)}>
+            Try 5 calls
+          </button>
+          <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate(undefined)}>
+            {run.isPending ? "Queuing…" : "Compress all"}
+          </button>
+        </div>
+      </div>
+      <p className="mt-2 text-sm" role="status" aria-live="polite">
+        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} recording${run.data.queued === 1 ? "" : "s"} for compression.` : "Nothing to queue.")}
       </p>
       {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
     </section>

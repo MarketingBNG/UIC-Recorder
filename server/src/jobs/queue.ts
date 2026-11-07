@@ -6,7 +6,11 @@ export const STALE_LOCK_MINUTES = 10;
 /** lastError of a translate job replaced by a newer transcript (not a real failure). */
 export const SUPERSEDED = "superseded by re-transcription";
 
-export const JOB_KINDS = ["transcribe", "translate"] as const;
+export const JOB_KINDS = ["transcribe", "translate", "compress"] as const;
+/** Kinds that run on an already TRANSCRIBED call and never change its status. */
+export const SIDE_KINDS = ["translate", "compress"] as const;
+/** Stored audio above this bitrate is worth re-encoding (phones upload ~24 kbps AAC). */
+export const COMPRESS_MIN_BPS = 40_000;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 export interface ClaimedJob {
@@ -91,9 +95,9 @@ async function failExhaustedStaleJobs(db: Db): Promise<void> {
         AND "attempts" >= ${MAX_ATTEMPTS}
       RETURNING "call_id", "kind"
     )
-    -- A failed translation leaves the call TRANSCRIBED.
+    -- A failed translation or compression leaves the call TRANSCRIBED.
     UPDATE "calls" SET "status" = 'FAILED', "updated_at" = now()
-    WHERE "id" IN (SELECT "call_id" FROM dead WHERE "kind" <> 'translate')`;
+    WHERE "id" IN (SELECT "call_id" FROM dead WHERE "kind" = 'transcribe')`;
 }
 
 /** Keeps a long-running job's lock fresh. Returns false if the lock was lost. */
@@ -121,7 +125,7 @@ export async function completeJob(
   jobId: string,
   workerId: string,
   result: TranscriptResult,
-  opts: { translate?: boolean } = {},
+  opts: { translate?: boolean; compress?: boolean } = {},
 ) {
   return db.$transaction(async (tx) => {
     const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "transcribe" } });
@@ -155,6 +159,7 @@ export async function completeJob(
       });
       if (!open) await tx.job.create({ data: { callId: job.callId, kind: "translate", priority: job.priority } });
     }
+    if (opts.compress) await queueCompression(tx, job.callId);
     return true;
   });
 }
@@ -245,10 +250,59 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
         failedAttemptAt: new Date(),
       },
     });
-    // A translate job never changes the call: it stays TRANSCRIBED.
-    if (job.kind !== "translate") {
+    // Translate / compress jobs never change the call: it stays TRANSCRIBED (a failed compression keeps the original).
+    if (job.kind === "transcribe") {
       await tx.call.update({ where: { id: job.callId }, data: { status: giveUp ? "FAILED" : "UPLOADED" } });
     }
     return true;
   });
+}
+
+// ---- Compression (Milestone 2b) ------------------------------------------
+
+type Tx = Parameters<Parameters<Db["$transaction"]>[0]>[0];
+
+/** SQL filter for calls whose stored audio is worth re-encoding: transcribed, big bitrate, not yet compressed. */
+const compressible = (alias: string) => `
+  ${alias}."status" = 'TRANSCRIBED' AND ${alias}."file_path" IS NOT NULL AND ${alias}."compressed_at" IS NULL
+  AND ${alias}."duration_s" > 0 AND ${alias}."file_size" * 8 / ${alias}."duration_s" > ${COMPRESS_MIN_BPS}
+  AND NOT EXISTS (SELECT 1 FROM "jobs" j WHERE j."call_id" = ${alias}."id" AND j."kind" = 'compress'
+                  AND j."status" IN ('QUEUED', 'RUNNING'))`;
+
+/** Queues a compress job (priority -1, below everything else) for one call if its audio is large. */
+export async function queueCompression(tx: Tx | Db, callId: string): Promise<number> {
+  return tx.$executeRawUnsafe(
+    `INSERT INTO "jobs" ("id", "call_id", "kind", "priority", "status", "attempts", "run_after", "created_at", "updated_at")
+     SELECT gen_random_uuid(), c."id", 'compress', -1, 'QUEUED', 0, now(), now(), now()
+     FROM "calls" c WHERE c."id" = $1::uuid AND ${compressible("c")}`,
+    callId,
+  );
+}
+
+/** Queues compress jobs for the oldest large transcribed recordings (all of them without `limit`). */
+export async function queueCompressionBackfill(db: Db, limit?: number): Promise<number> {
+  return db.$executeRawUnsafe(
+    `INSERT INTO "jobs" ("id", "call_id", "kind", "priority", "status", "attempts", "run_after", "created_at", "updated_at")
+     SELECT gen_random_uuid(), c."id", 'compress', -1, 'QUEUED', 0, now(), now(), now()
+     FROM (SELECT c."id" FROM "calls" c WHERE ${compressible("c")} ORDER BY c."started_at" ASC
+           ${limit ? "LIMIT $1" : ""}) c`,
+    ...(limit ? [limit] : []),
+  );
+}
+
+/** Disk space freed so far and what is left to do, for the dashboard. */
+export async function compressionStats(db: Db) {
+  const [row] = await db.$queryRawUnsafe<{ compressed: bigint; saved: bigint | null; eligible: bigint; queued: bigint }[]>(
+    `SELECT
+       (SELECT count(*) FROM "calls" WHERE "compressed_at" IS NOT NULL) AS "compressed",
+       (SELECT sum("bytes_saved") FROM "calls" WHERE "compressed_at" IS NOT NULL) AS "saved",
+       (SELECT count(*) FROM "calls" c WHERE ${compressible("c")}) AS "eligible",
+       (SELECT count(*) FROM "jobs" WHERE "kind" = 'compress' AND "status" IN ('QUEUED', 'RUNNING')) AS "queued"`,
+  );
+  return {
+    compressedCalls: Number(row?.compressed ?? 0),
+    bytesSaved: Number(row?.saved ?? 0),
+    eligibleCalls: Number(row?.eligible ?? 0),
+    queuedJobs: Number(row?.queued ?? 0),
+  };
 }

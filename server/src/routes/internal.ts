@@ -4,6 +4,8 @@ import { touchWorker } from "../alerts/checks.js";
 import { getCostSettings, translateCapped } from "../translation/cost.js";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
+import { CompressQuery, storeCompressedAudio } from "../calls/compress.js";
+import { ALLOWED_AUDIO_MIME } from "../storage/local.js";
 import { JOB_KINDS, claimJobs, claimOverflowJobs, completeJob, completeTranslation, failJob, heartbeatJob, recordTranslationCost } from "../jobs/queue.js";
 
 const Claim = z.object({
@@ -91,6 +93,14 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     };
   });
 
+  app.addContentTypeParser(ALLOWED_AUDIO_MIME, (_req, _payload, done) => done(null));
+
+  /** Compress job result: the re-encoded audio replaces the original (which is kept on any failure). */
+  app.put<{ Params: { callId: string } }>("/internal/calls/:callId/audio-compressed", auth, async (req) => {
+    const callId = z.uuid().parse(req.params.callId);
+    return storeCompressedAudio(deps, req, callId, CompressQuery.parse(req.query));
+  });
+
   app.get<{ Params: { callId: string } }>("/internal/audio/:callId", auth, async (req, reply) => {
     const callId = z.uuid().parse(req.params.callId);
     const call = await deps.db.call.findUnique({ where: { id: callId }, select: { filePath: true, mimeType: true } });
@@ -125,7 +135,10 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     const body = Result.parse(req.body);
     if (!body.ok && body.usage && body.model) await recordTranslationCost(deps.db, jobId, body.model, body.usage);
     const ok = body.ok
-      ? await completeJob(deps.db, jobId, body.workerId, body, { translate: deps.config.TRANSLATE_ENABLED })
+      ? await completeJob(deps.db, jobId, body.workerId, body, {
+          translate: deps.config.TRANSLATE_ENABLED,
+          compress: deps.config.COMPRESS_AFTER_TRANSCRIBE,
+        })
       : await failJob(deps.db, jobId, body.workerId, body.error, body.retryable);
     if (!ok) throw new HttpError(409, "Job is not locked by this worker");
     return reply.code(204).send();

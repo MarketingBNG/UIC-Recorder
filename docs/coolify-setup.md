@@ -92,6 +92,14 @@ A second worker can transcribe backlog calls that are waiting because the Firefl
 1. Add a second worker service (same repo, `worker/`) with `TRANSCRIBE_PROVIDER=sarvam`, `SARVAM_API_KEY`, and optionally `SARVAM_MODEL` and `SARVAM_LANGUAGE`, plus the usual `API_URL` / `WORKER_TOKEN`. It needs ffmpeg in the image (added with the compression milestone).
 2. Health page → Cost settings → **Send overflow backlog to Sarvam** (admin). Until this is on, a Sarvam worker gets no jobs.
 
+## Compress old recordings
+Imported recordings and phone uploads that skipped compression are often around 1 MB/min. The worker can re-encode them to the phones' format (mono AAC, 16 kHz, 24 kbps, about 5x smaller), only after the call is transcribed.
+
+1. The worker image installs ffmpeg (`aptPackages` in `worker/railpack.json`); redeploy `uic-worker` once. Without ffmpeg (or with `COMPRESS_ENABLED=false` on the worker) it doesn't take compress jobs and they wait in the queue.
+2. Health page → **Compress old recordings** (admin): **Try 5 calls** first. Check sizes and play those calls in the dashboard (seeking should work), then **Compress all**. Same as `POST /api/admin/compress-backfill` with optional `{ "limit": n }`.
+3. Optional: on `uic-api`, `COMPRESS_AFTER_TRANSCRIBE=true` (default `false`) queues compression automatically after each transcript above 40 kbps.
+4. Only `TRANSCRIBED` calls above 40 kbps are picked, oldest first. The new file must be smaller and within 1 s of the old duration, or the original is kept. `originalSha256` doesn't change, so phones don't re-upload. Disk saved shows under Health → Details.
+
 ## Alerts (Zoho Cliq)
 The API checks every 5 minutes and posts to a Zoho Cliq channel when something breaks: no worker contact for 10 min, a Fireflies hard stop or 80%/100% of the monthly budget, more than 5% of transcription jobs failing in the last hour, queued jobs not moving for 2 h, server disk over 80%, or a phone not seen for 48 h. An ongoing problem repeats at most every 6 h, and a "Resolved" message is posted when it clears.
 

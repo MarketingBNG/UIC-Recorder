@@ -158,6 +158,12 @@ private fun StatsHeader(s: Stats) {
                 color = diskColor,
                 modifier = Modifier.fillMaxWidth(),
             )
+            s.compression?.let { c ->
+                Text(
+                    "Saved by compression: ${formatBytes(c.bytesSaved)} (${c.compressedCalls} calls)",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             s.throughput?.let { t ->
                 val failColor = if (t.failureRatePct > 5) MaterialTheme.colorScheme.error else Color.Unspecified
                 Text(

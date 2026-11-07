@@ -7,6 +7,7 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.jsonObject
 import okhttp3.Authenticator
@@ -195,6 +196,10 @@ class ApiClient(
 
     /** Queues an English translation for every transcript that has none yet (admin only). */
     suspend fun translateBackfill(): TranslateBackfill = post("/api/admin/translate-backfill", JsonObject(emptyMap()))
+
+    /** Queues compression of large transcribed recordings, oldest first; [limit] for a trial run (admin only). */
+    suspend fun compressBackfill(limit: Int? = null): TranslateBackfill =
+        post("/api/admin/compress-backfill", JsonObject(if (limit != null) mapOf("limit" to JsonPrimitive(limit)) else emptyMap()))
 
     /** Posts a test message to the Zoho Cliq alert channel (admin only). */
     suspend fun testAlert(): TestAlertResult = post("/api/admin/test-alert", JsonObject(emptyMap()))

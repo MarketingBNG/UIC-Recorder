@@ -106,6 +106,18 @@ class Api:
             return
         res.raise_for_status()
 
+    # ---- Compression ----
+
+    @_network_retry
+    def put_compressed(self, call_id: str, job_id: str, path: Path, sha256: str) -> None:
+        """Uploads re-encoded audio; the server swaps it in (or keeps the original and says why)."""
+        with path.open("rb") as f:
+            res = self.http.put(f"/internal/calls/{call_id}/audio-compressed",
+                                params={"jobId": job_id, "workerId": self.worker_id},
+                                headers={"content-type": "audio/mp4", "x-content-sha256": sha256},
+                                content=f.read())
+        res.raise_for_status()
+
     # ---- Fireflies (server-side budget + signed audio URL) ----
 
     @_network_retry
@@ -217,6 +229,15 @@ def run(settings: Settings) -> None:
 
         translator = Translator.start(api, settings, lambda: stopping)
 
+    compressor = None
+    if settings.compress_enabled:
+        from .compressor import Compressor, ffmpeg_available
+
+        if ffmpeg_available():
+            compressor = Compressor.start(api, settings.idle_max_sleep, lambda: stopping)
+        else:
+            log.warning("ffmpeg not found; compress jobs are left for another worker")
+
     if hasattr(provider, "sweep_leftovers"):
         threading.Thread(target=_sweep_loop, args=(api, provider, lambda: stopping), daemon=True,
                          name="fireflies-sweep").start()
@@ -247,6 +268,8 @@ def run(settings: Settings) -> None:
                 idle = min(idle * 2, settings.idle_max_sleep)
     if translator:
         translator.join()
+    if compressor:
+        compressor.join()
 
 
 def _sweep_loop(api: Api, provider, is_stopping) -> None:

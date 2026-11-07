@@ -46,6 +46,13 @@ export interface CallDetail extends Omit<CallItem, "transcript"> {
     translationPending?: boolean;
   } | null;
 }
+export interface CompressionStats {
+  compressedCalls: number;
+  bytesSaved: number;
+  /** Transcribed recordings above 40 kbps not compressed or queued yet. */
+  eligibleCalls: number;
+  queuedJobs: number;
+}
 export interface TranslateBackfillResult {
   queued: number;
 }
@@ -88,6 +95,8 @@ export interface Stats {
   alertsEnabled?: boolean;
   /** Absent on servers before cost tracking (M2). */
   translation?: TranslationAlert;
+  /** Absent on servers before recording compression (M2b). */
+  compression?: CompressionStats;
 }
 export interface TranslationAlert {
   month: string;

@@ -43,6 +43,8 @@ class Settings:
     sarvam_api_key: str | None = None
     sarvam_model: str = "saaras:v3"
     sarvam_language: str = "unknown"
+    # Re-encode large transcribed recordings to small AAC (needs ffmpeg on PATH)
+    compress_enabled: bool = True
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -78,4 +80,5 @@ class Settings:
             sarvam_model=e.get("SARVAM_MODEL") or "saaras:v3",
             # BCP-47 code, or "unknown" to auto-detect per chunk.
             sarvam_language=e.get("SARVAM_LANGUAGE") or "unknown",
+            compress_enabled=(e.get("COMPRESS_ENABLED") or "true").lower() not in ("false", "0", "no"),
         )

@@ -42,6 +42,13 @@ const schema = z.object({
     .enum(["true", "false", "1", "0", ""])
     .default("true")
     .transform((v) => v !== "false" && v !== "0"),
+
+  // Queue a compress job after transcription when the stored audio is above 40 kbps (worker needs ffmpeg).
+  // Off by default: try the admin "Compress old recordings" button on a few calls first.
+  COMPRESS_AFTER_TRANSCRIBE: z
+    .enum(["true", "false", "1", "0", ""])
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
 });
 
 export type Config = z.infer<typeof schema>;

@@ -5,7 +5,7 @@ import { HttpError, currentUser, type Deps } from "../context.js";
 import { Prisma, type AuditAction, type User } from "../generated/prisma/client.js";
 import { DeviceConfig, getSettings } from "../settings.js";
 import { firefliesUsage } from "../fireflies/budget.js";
-import { queueTranslationBackfill } from "../jobs/queue.js";
+import { compressionStats, queueCompressionBackfill, queueTranslationBackfill } from "../jobs/queue.js";
 import { cliqSender } from "../alerts/cliq.js";
 import { throughput } from "../alerts/metrics.js";
 import { CostSettings, getCostSettings, saveCostSettings, translationUsage } from "../translation/cost.js";
@@ -237,6 +237,16 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     return { queued };
   });
 
+  /** Queues compression of large transcribed recordings, oldest first; `limit` (e.g. 5) for a trial run. */
+  app.post("/api/admin/compress-backfill", admins, async (req) => {
+    const { limit } = z.object({ limit: z.number().int().min(1).max(100_000).optional() }).parse(req.body ?? {});
+    const queued = await queueCompressionBackfill(deps.db, limit);
+    req.log.info({ queued, limit, by: currentUser(req).id }, "compress backfill queued");
+    return { queued };
+  });
+
+  app.get("/api/compression", managers, async () => compressionStats(deps.db));
+
   /** Posts a test message to the Zoho Cliq channel (bypasses dedupe). */
   app.post("/api/admin/test-alert", admins, async (req) => {
     const url = deps.config.CLIQ_WEBHOOK_URL;
@@ -265,7 +275,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get("/api/stats", managers, async () => {
-    const [byStatus, queue, disk, staleDevices, fireflies, rates, translation] = await Promise.all([
+    const [byStatus, queue, disk, staleDevices, fireflies, rates, translation, compression] = await Promise.all([
       deps.db.call.groupBy({ by: ["status"], _count: true }),
       deps.db.job.groupBy({ by: ["status"], _count: true }),
       deps.storage.diskUsage(),
@@ -273,6 +283,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       firefliesUsage(deps.db),
       throughput(deps.db),
       translationUsage(deps.db),
+      compressionStats(deps.db),
     ]);
     return {
       calls: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
@@ -290,6 +301,8 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         pct: translation.pct,
         capped: translation.capped,
       },
+      // Disk freed by re-encoding old recordings (additive).
+      compression,
       // Banner state for the dashboard / app (additive).
       fireflies: {
         month: fireflies.month,

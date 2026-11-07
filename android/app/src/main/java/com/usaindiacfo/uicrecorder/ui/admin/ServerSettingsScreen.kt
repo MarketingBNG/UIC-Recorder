@@ -38,6 +38,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.usaindiacfo.uicrecorder.appContainer
+import com.usaindiacfo.uicrecorder.data.api.CompressionStats
 import com.usaindiacfo.uicrecorder.data.api.DeviceConfig
 import com.usaindiacfo.uicrecorder.data.api.LatestAppInfo
 import kotlinx.coroutines.launch
@@ -208,6 +209,9 @@ private fun ConfigEditor(
         TranslateBackfillSection()
 
         HorizontalDivider()
+        CompressBackfillSection()
+
+        HorizontalDivider()
         TestAlertSection()
 
         latestApp?.let {
@@ -242,6 +246,42 @@ private fun TranslateBackfillSection() {
     ) { Text(if (busy) "Queuing…" else "Translate existing transcripts") }
     result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 }
+
+/** Re-encodes large old recordings to the phones' small AAC format (after transcription only). */
+@Composable
+private fun CompressBackfillSection() {
+    val api = appContainer().apiClient
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    var stats by remember { mutableStateOf<CompressionStats?>(null) }
+    LaunchedEffect(Unit) { apiCall { api.stats() }.onSuccess { stats = it.compression } }
+    val c = stats ?: return
+    Text("Compress old recordings", style = MaterialTheme.typography.labelLarge)
+    Text(compressDescription(c), style = MaterialTheme.typography.bodySmall)
+    fun queue(limit: Int?) {
+        busy = true; result = null
+        scope.launch {
+            apiCall { api.compressBackfill(limit) }
+                .onSuccess { result = compressQueuedMessage(it.queued) }
+                .onFailure { result = it.userMessage() }
+            apiCall { api.stats() }.onSuccess { stats = it.compression }
+            busy = false
+        }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = { queue(5) }, enabled = !busy) { Text("Try 5 calls") }
+        OutlinedButton(onClick = { queue(null) }, enabled = !busy) { Text(if (busy) "Queuing…" else "Compress all") }
+    }
+    result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+internal fun compressDescription(c: CompressionStats): String =
+    "Saved ${formatBytes(c.bytesSaved)} on ${c.compressedCalls} calls. ${c.eligibleCalls} large transcribed recordings left" +
+        (if (c.queuedJobs > 0) ", ${c.queuedJobs} queued" else "") + ". The original is kept if anything fails."
+
+internal fun compressQueuedMessage(queued: Int): String =
+    if (queued == 0) "Nothing to queue." else "Queued $queued recording${if (queued == 1) "" else "s"} for compression."
 
 /** Posts a test message to the Zoho Cliq alert channel. */
 @Composable
