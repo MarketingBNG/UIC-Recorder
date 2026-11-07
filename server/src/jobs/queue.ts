@@ -1,4 +1,5 @@
 import type { Db } from "../db.js";
+import { claudeCostUsd } from "../translation/cost.js";
 
 export const MAX_ATTEMPTS = 5;
 export const STALE_LOCK_MINUTES = 10;
@@ -45,6 +46,35 @@ export async function claimJobs(
       ORDER BY "priority" DESC, "created_at" ASC
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
+    )
+    RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority"`;
+}
+
+/**
+ * Sarvam overflow: backlog transcribe jobs parked by the Fireflies monthly budget (reason BUDGET only).
+ * Never live calls, never calls already uploaded to Fireflies (those minutes are paid for), and only
+ * while an admin has switched sarvamOverflow on (checked by the caller).
+ */
+export async function claimOverflowJobs(db: Db, workerId: string, limit: number): Promise<ClaimedJob[]> {
+  return db.$queryRaw<ClaimedJob[]>`
+    UPDATE "jobs" SET
+      "status" = 'RUNNING',
+      "locked_at" = now(),
+      "started_at" = now(),
+      "locked_by" = ${workerId},
+      "attempts" = "attempts" + 1,
+      "updated_at" = now()
+    WHERE "id" IN (
+      SELECT j."id" FROM "jobs" j JOIN "calls" c ON c."id" = j."call_id"
+      WHERE j."kind" = 'transcribe'
+        AND j."status" = 'WAITING_BUDGET'
+        AND j."last_error" LIKE 'WAITING_BUDGET: BUDGET%'
+        AND j."attempts" < ${MAX_ATTEMPTS}
+        AND c."source" <> 'LIVE'
+        AND NOT EXISTS (SELECT 1 FROM "fireflies_reservations" r WHERE r."call_id" = j."call_id" AND r."uploaded_at" IS NOT NULL)
+      ORDER BY j."priority" DESC, j."created_at" ASC
+      LIMIT ${limit}
+      FOR UPDATE OF j SKIP LOCKED
     )
     RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority"`;
 }
@@ -104,6 +134,9 @@ export async function completeJob(
       // A re-transcription invalidates any earlier English version.
       textEn: null,
       translationModel: null,
+      translationInputTokens: null,
+      translationOutputTokens: null,
+      translationCostUsd: null,
     };
     await tx.transcript.upsert({ where: { callId: job.callId }, create: { callId: job.callId, ...data }, update: data });
     await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
@@ -126,20 +159,46 @@ export async function completeJob(
   });
 }
 
+export interface TranslationUsage {
+  inputTokens: number;
+  outputTokens: number;
+  batch: boolean;
+}
+
 export interface TranslationResult {
   model: string;
   textEn: string;
   segments: Record<string, unknown>[];
+  usage?: TranslationUsage | undefined;
 }
 
-/** Stores the English version for a translate job this worker holds. Returns false if the lock was lost. */
+/**
+ * Stores the English version for a translate job this worker holds. Returns false if the lock was lost.
+ * The Claude cost is recorded on the job either way: the tokens were paid for even if the result is discarded.
+ */
 export async function completeTranslation(db: Db, jobId: string, workerId: string, result: TranslationResult) {
+  const cost = result.usage
+    ? claudeCostUsd(result.model, result.usage.inputTokens, result.usage.outputTokens, result.usage.batch)
+    : null;
+  if (cost !== null) {
+    // Adds to any earlier attempt's cost (a retried job pays again).
+    await db.$executeRaw`
+      UPDATE "jobs" SET "cost_usd" = coalesce("cost_usd", 0) + ${cost}, "cost_at" = now()
+      WHERE "id" = ${jobId}::uuid AND "kind" = 'translate'`;
+  }
   return db.$transaction(async (tx) => {
     const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "translate" } });
     if (!job) return false;
     const { count } = await tx.transcript.updateMany({
       where: { callId: job.callId },
-      data: { textEn: result.textEn, translationModel: result.model, segments: result.segments as object[] },
+      data: {
+        textEn: result.textEn,
+        translationModel: result.model,
+        segments: result.segments as object[],
+        translationInputTokens: result.usage?.inputTokens ?? null,
+        translationOutputTokens: result.usage?.outputTokens ?? null,
+        translationCostUsd: cost,
+      },
     });
     if (count !== 1) return false;
     await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });

@@ -84,6 +84,13 @@ Every new transcript also gets an English version, made by Claude Opus 5.5 on th
 2. On `uic-worker`, set `ANTHROPIC_API_KEY`. Without it the worker doesn't take translate jobs and they wait in the queue. Optional settings are in `worker/.env.example`.
 3. To translate transcripts made before this feature, an admin sends `POST /api/admin/translate-backfill` (the dashboard settings page has a button for it). It queues one job per untranslated transcript and returns `{ "queued": n }`. These run as low-priority batches.
 4. A failed translation doesn't change the call: it stays `TRANSCRIBED` and shows the original transcript.
+5. **Monthly cap:** the Health page card "Translation spend this month" shows the Claude cost (from token usage, batch at half price). Admins set the cap there (default 500 USD). At the cap, translate jobs stay queued until next month or a higher cap; Cliq alerts at 80% and 100%. A running batch can go over by one batch. No env var needed.
+
+## Sarvam overflow (optional, off by default)
+A second worker can transcribe backlog calls that are waiting because the Fireflies monthly budget is used up. It never takes live calls or calls already sent to Fireflies. Run the eval (`worker/scripts/eval_transcripts.py`) and get spend approval first.
+
+1. Add a second worker service (same repo, `worker/`) with `TRANSCRIBE_PROVIDER=sarvam`, `SARVAM_API_KEY`, and optionally `SARVAM_MODEL` and `SARVAM_LANGUAGE`, plus the usual `API_URL` / `WORKER_TOKEN`. It needs ffmpeg in the image (added with the compression milestone).
+2. Health page → Cost settings → **Send overflow backlog to Sarvam** (admin). Until this is on, a Sarvam worker gets no jobs.
 
 ## Alerts (Zoho Cliq)
 The API checks every 5 minutes and posts to a Zoho Cliq channel when something breaks: no worker contact for 10 min, a Fireflies hard stop or 80%/100% of the monthly budget, more than 5% of transcription jobs failing in the last hour, queued jobs not moving for 2 h, server disk over 80%, or a phone not seen for 48 h. An ongoing problem repeats at most every 6 h, and a "Resolved" message is posted when it clears.

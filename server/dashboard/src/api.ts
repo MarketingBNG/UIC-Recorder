@@ -86,6 +86,25 @@ export interface Stats {
   /** Absent on servers before alerting (M1). */
   throughput?: Throughput;
   alertsEnabled?: boolean;
+  /** Absent on servers before cost tracking (M2). */
+  translation?: TranslationAlert;
+}
+export interface TranslationAlert {
+  month: string;
+  spentUsd: number;
+  budgetUsd: number;
+  pct: number;
+  capped: boolean;
+}
+export interface TranslationUsage extends TranslationAlert {
+  translatedThisMonth: number;
+  avgCostUsd: number | null;
+  queuedJobs: number;
+  sarvamOverflow: boolean;
+}
+export interface CostSettingsPatch {
+  translateBudgetUsd?: number;
+  sarvamOverflow?: boolean;
 }
 export interface Throughput {
   jobsPerHour: number;

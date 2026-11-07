@@ -8,6 +8,7 @@ import { firefliesUsage } from "../fireflies/budget.js";
 import { queueTranslationBackfill } from "../jobs/queue.js";
 import { cliqSender } from "../alerts/cliq.js";
 import { throughput } from "../alerts/metrics.js";
+import { CostSettings, getCostSettings, saveCostSettings, translationUsage } from "../translation/cost.js";
 
 const ListQuery = z.object({
   q: z.string().trim().max(200).optional(),
@@ -246,6 +247,17 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     return { sent: true };
   });
 
+  app.get("/api/translation/usage", managers, async () => translationUsage(deps.db));
+
+  /** Claude monthly cap + Sarvam overflow switch. Raising the cap lets QUEUED translate jobs run on the next claim. */
+  app.put("/api/settings/costs", admins, async (req) => {
+    const patch = CostSettings.partial().parse(req.body);
+    const current = await getCostSettings(deps.db);
+    await saveCostSettings(deps.db, { ...current, ...patch });
+    req.log.info({ patch, by: currentUser(req).id }, "cost settings changed");
+    return translationUsage(deps.db);
+  });
+
   app.put("/api/settings/device-config", admins, async (req) => {
     const deviceConfig = DeviceConfig.parse(req.body);
     await deps.db.setting.upsert({ where: { id: 1 }, create: { id: 1, deviceConfig }, update: { deviceConfig } });
@@ -253,13 +265,14 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get("/api/stats", managers, async () => {
-    const [byStatus, queue, disk, staleDevices, fireflies, rates] = await Promise.all([
+    const [byStatus, queue, disk, staleDevices, fireflies, rates, translation] = await Promise.all([
       deps.db.call.groupBy({ by: ["status"], _count: true }),
       deps.db.job.groupBy({ by: ["status"], _count: true }),
       deps.storage.diskUsage(),
       deps.db.device.count({ where: { revokedAt: null, lastSeenAt: { lt: new Date(Date.now() - 24 * 3600_000) } } }),
       firefliesUsage(deps.db),
       throughput(deps.db),
+      translationUsage(deps.db),
     ]);
     return {
       calls: Object.fromEntries(byStatus.map((r) => [r.status, r._count])),
@@ -269,6 +282,14 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       // Throughput + backlog ETA (additive).
       throughput: rates,
       alertsEnabled: !!deps.config.CLIQ_WEBHOOK_URL,
+      // Claude translation spend vs. its monthly cap (additive).
+      translation: {
+        month: translation.month,
+        spentUsd: translation.spentUsd,
+        budgetUsd: translation.budgetUsd,
+        pct: translation.pct,
+        capped: translation.capped,
+      },
       // Banner state for the dashboard / app (additive).
       fireflies: {
         month: fireflies.month,

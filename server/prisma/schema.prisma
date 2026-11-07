@@ -163,6 +163,10 @@ model Transcript {
   // English version made by the worker's translate job; null until translated.
   textEn           String? @map("text_en")
   translationModel String? @map("translation_model")
+  // Claude tokens + USD for the current English version (see src/translation/cost.ts).
+  translationInputTokens  Int?    @map("translation_input_tokens")
+  translationOutputTokens Int?    @map("translation_output_tokens")
+  translationCostUsd      Float?  @map("translation_cost_usd")
   // Generated column: to_tsvector('simple', text || ' ' || coalesce(text_en, '')). Created in migration SQL.
   tsv       Unsupported("tsvector")?
   createdAt DateTime                 @default(now()) @map("created_at")
@@ -189,6 +193,9 @@ model Job {
   finishedAt DateTime? @map("finished_at")
   // Last failed attempt (retried or final); feeds the failure-rate alert.
   failedAttemptAt DateTime? @map("failed_attempt_at")
+  // Claude spend of a translate job (paid even if its result was discarded); feeds the monthly cap.
+  costUsd   Float?    @map("cost_usd")
+  costAt    DateTime? @map("cost_at")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
@@ -197,6 +204,7 @@ model Job {
   @@index([status, priority(sort: Desc), createdAt])
   @@index([finishedAt])
   @@index([failedAttemptAt])
+  @@index([costAt])
   @@map("jobs")
 }
 
@@ -222,6 +230,8 @@ model Setting {
   latestApp    Json?    @map("latest_app")
   // Fireflies budget settings + hard-stop state (see src/fireflies/settings.ts).
   fireflies    Json?
+  // Claude translation cap + Sarvam overflow switch (see src/translation/cost.ts).
+  costs        Json?
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("settings")

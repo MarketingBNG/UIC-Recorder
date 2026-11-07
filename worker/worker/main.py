@@ -42,6 +42,8 @@ class Api:
 
     def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None) -> None:
         self.worker_id = settings.worker_id
+        # Sent with claims so the API can route: a "sarvam" worker only gets Fireflies-budget overflow jobs.
+        self.provider = settings.provider
         self.http = httpx.Client(
             base_url=settings.api_url,
             headers={"Authorization": f"Bearer {settings.worker_token}"},
@@ -51,8 +53,8 @@ class Api:
 
     @_network_retry
     def claim(self, limit: int, kinds: tuple[str, ...] = ("transcribe",)) -> list[dict]:
-        res = self.http.post("/internal/jobs/claim",
-                             json={"workerId": self.worker_id, "limit": limit, "kinds": list(kinds)})
+        res = self.http.post("/internal/jobs/claim", json={"workerId": self.worker_id, "limit": limit,
+                                                           "kinds": list(kinds), "provider": self.provider})
         res.raise_for_status()
         return res.json()["jobs"]
 

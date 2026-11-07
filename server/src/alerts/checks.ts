@@ -3,6 +3,7 @@ import { firefliesUsage } from "../fireflies/budget.js";
 import type { LocalStorage } from "../storage/local.js";
 import { type AlertSender, resolveAlert, sendAlert } from "./cliq.js";
 import { jobStats } from "./metrics.js";
+import { translationUsage } from "../translation/cost.js";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -141,9 +142,23 @@ async function phoneCheck(db: Db, now: Date): Promise<CheckResult> {
   };
 }
 
-/** Claude spend vs. its monthly cap. Spend isn't tracked until Milestone 2, so this never fires yet. */
-async function claudeSpendCheck(): Promise<CheckResult | null> {
-  return null;
+const CLAUDE_THRESHOLDS = [80, 100] as const;
+
+/** Claude translation spend vs. its monthly cap (80% warning, 100% = translations paused). */
+async function claudeSpendChecks(db: Db, now: Date): Promise<CheckResult[]> {
+  const u = await translationUsage(db, now);
+  return CLAUDE_THRESHOLDS.map((t) => {
+    const firing = u.pct >= t;
+    const tail = t === 100 ? " English translations are paused until next month or a higher cap." : "";
+    return {
+      key: `claude-spend-${t}`,
+      firing,
+      text: firing
+        ? `Claude translation spend ${u.pct}% of the cap for ${u.month} (USD ${u.spentUsd} of ${u.budgetUsd}).${tail}`
+        : `Claude translation spend back under ${t}% (${u.pct}% for ${u.month}).`,
+      repeat: false,
+    };
+  });
 }
 
 /** Evaluates every check. A check that errors is skipped (its alert state is left alone). */
@@ -154,7 +169,7 @@ export async function evaluateChecks(db: Db, storage: LocalStorage, now = new Da
     queueChecks(db, now).catch(() => []),
     diskCheck(storage),
     phoneCheck(db, now).catch(() => null),
-    claudeSpendCheck(),
+    claudeSpendChecks(db, now).catch(() => []),
   ]);
   return parts.flat().filter((c): c is CheckResult => c !== null);
 }

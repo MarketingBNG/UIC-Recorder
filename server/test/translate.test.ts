@@ -19,6 +19,8 @@ afterAll(async () => {
 // Each test sees only its own jobs.
 beforeEach(async () => {
   await t.db.job.updateMany({ where: { status: { in: ["QUEUED", "RUNNING", "WAITING_BUDGET"] } }, data: { status: "DONE" } });
+  await t.db.job.updateMany({ where: { costAt: { not: null } }, data: { costUsd: null, costAt: null } });
+  await t.db.setting.updateMany({ data: { costs: {} } });
 });
 
 async function newCall(status: "UPLOADED" | "TRANSCRIBED" = "UPLOADED") {

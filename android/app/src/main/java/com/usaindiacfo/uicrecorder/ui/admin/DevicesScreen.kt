@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.usaindiacfo.uicrecorder.appContainer
 import com.usaindiacfo.uicrecorder.data.api.DeviceDto
+import com.usaindiacfo.uicrecorder.data.api.CostSettingsPatch
 import com.usaindiacfo.uicrecorder.data.api.FirefliesPatch
 import com.usaindiacfo.uicrecorder.data.api.Stats
 import kotlinx.coroutines.async
@@ -69,6 +70,8 @@ fun DevicesScreen() {
     var now by remember { mutableStateOf(Instant.now()) }
     val ff = remember { FirefliesPanelState() }
     val ffSave: (FirefliesPatch, String) -> Unit = { patch, done -> ff.save(scope, api, patch, done) { snackbar.showSnackbar(it) } }
+    val tr = remember { TranslationPanelState() }
+    val trSave: (CostSettingsPatch) -> Unit = { patch -> tr.save(scope, api, patch) { snackbar.showSnackbar(it) } }
 
     LaunchedEffect(reload) {
         refreshing = true
@@ -77,6 +80,7 @@ fun DevicesScreen() {
         val (d, s) = coroutineScope {
             val s = async { apiCall { api.stats() } }
             launch { ff.load(api) }
+            launch { tr.load(api) }
             apiCall { api.devices() } to s.await()
         }
         s.onSuccess { stats = it }
@@ -101,6 +105,7 @@ fun DevicesScreen() {
                 ) {
                     stats?.let { s -> item(key = "stats") { StatsHeader(s) } }
                     item(key = "fireflies") { FirefliesPanel(isAdmin, ff, ffSave) }
+                    item(key = "translation") { TranslationPanel(isAdmin, tr, trSave) }
                     if (sorted.isEmpty()) item(key = "empty") { Text("No devices have signed in yet.") }
                     items(sorted, key = { it.id }) { d ->
                         DeviceRow(d, now, onRevoke = if (isAdmin && d.revokedAt == null) ({ confirm = d }) else null)

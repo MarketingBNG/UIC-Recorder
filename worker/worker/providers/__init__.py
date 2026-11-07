@@ -45,5 +45,9 @@ def load_provider(settings: Settings) -> Provider:
             from .fireflies import FirefliesProvider
 
             return FirefliesProvider(settings)
+        case "sarvam":
+            from .sarvam import SarvamProvider
+
+            return SarvamProvider(settings)
         case other:
             raise SystemExit(f"Unknown TRANSCRIBE_PROVIDER: {other}")

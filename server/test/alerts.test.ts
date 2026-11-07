@@ -41,10 +41,10 @@ afterAll(async () => {
 // Other test files share the database: neutralize their jobs, devices and Fireflies state.
 beforeEach(async () => {
   await t.db.job.updateMany({ where: { status: { in: ["QUEUED", "RUNNING", "WAITING_BUDGET"] } }, data: { status: "DONE" } });
-  await t.db.job.updateMany({ data: { finishedAt: null, failedAttemptAt: null } });
+  await t.db.job.updateMany({ data: { finishedAt: null, failedAttemptAt: null, costUsd: null, costAt: null } });
   await t.db.device.updateMany({ data: { lastSeenAt: new Date() } });
   await t.db.firefliesReservation.deleteMany();
-  await t.db.setting.updateMany({ data: { fireflies: {} } });
+  await t.db.setting.updateMany({ data: { fireflies: {}, costs: {} } });
   await t.db.workerSeen.deleteMany();
   await t.db.alertState.deleteMany();
 });
@@ -279,6 +279,28 @@ describe("checks", () => {
     expect(c.sent.some((m) => m.startsWith("Fireflies hard stop"))).toBe(true);
     expect(c.sent.some((m) => m.startsWith("Fireflies budget 85% used"))).toBe(true);
     expect(c.sent).toHaveLength(2); // 100% threshold not reached
+  });
+});
+
+describe("Claude spend alert", () => {
+  it("alerts at 80% and 100% of the cap once each, then resolves", async () => {
+    const c = fakeCliq();
+    const now = new Date();
+    await t.db.setting.upsert({ where: { id: 1 }, create: { id: 1, deviceConfig: {}, costs: { translateBudgetUsd: 10 } }, update: { costs: { translateBudgetUsd: 10 } } });
+    const call = await newCall();
+    const job = await t.db.job.create({ data: { callId: call.id, kind: "translate", status: "DONE", costUsd: 8.5, costAt: now } });
+    await runChecks(t.db, disk(10), c.send, now);
+    expect(c.sent.filter((m) => m.startsWith("Claude translation spend 85%"))).toHaveLength(1);
+    await runChecks(t.db, disk(10), c.send, new Date(now.getTime() + 7 * HOUR));
+    expect(c.sent).toHaveLength(1); // repeat: false
+
+    await t.db.job.update({ where: { id: job.id }, data: { costUsd: 10 } });
+    await runChecks(t.db, disk(10), c.send, now);
+    expect(c.sent.some((m) => m.includes("paused"))).toBe(true);
+
+    await t.db.setting.update({ where: { id: 1 }, data: { costs: { translateBudgetUsd: 100 } } });
+    await runChecks(t.db, disk(10), c.send, now);
+    expect(c.sent.filter((m) => m.startsWith("Resolved:"))).toHaveLength(2);
   });
 });
 

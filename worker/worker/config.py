@@ -39,6 +39,10 @@ class Settings:
     translate_model: str = "claude-opus-5-5"
     translate_batch_max: int = 100
     translate_batch_wait_s: float = 900
+    # Sarvam (overflow when the Fireflies budget runs out)
+    sarvam_api_key: str | None = None
+    sarvam_model: str = "saaras:v3"
+    sarvam_language: str = "unknown"
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -70,4 +74,8 @@ class Settings:
             # Backlog translations: one Message Batch per this many calls, or after this long.
             translate_batch_max=max(1, int(e.get("TRANSLATE_BATCH_MAX", "100"))),
             translate_batch_wait_s=float(e.get("TRANSLATE_BATCH_WAIT_S", "900")),
+            sarvam_api_key=e.get("SARVAM_API_KEY") or None,
+            sarvam_model=e.get("SARVAM_MODEL") or "saaras:v3",
+            # BCP-47 code, or "unknown" to auto-detect per chunk.
+            sarvam_language=e.get("SARVAM_LANGUAGE") or "unknown",
         )

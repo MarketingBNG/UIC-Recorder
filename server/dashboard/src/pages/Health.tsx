@@ -4,6 +4,7 @@ import { api, type CallStatus, type TranslateBackfillResult, type Device, type S
 import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
+import { TranslationPanel } from "../components/Translation";
 import { Badge, ConfirmDialog, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
 
 const STALE_MS = 24 * 3600_000;
@@ -54,6 +55,7 @@ export function HealthPage() {
       {stats.isError && <p className="mb-4 text-sm text-amber-700 dark:text-amber-300">Server stats unavailable: {stats.error.message}</p>}
 
       <FirefliesPanel />
+      <TranslationPanel />
       {isAdmin && <TranslateBackfill />}
       {isAdmin && <TestAlert enabled={stats.data?.alertsEnabled} />}
 

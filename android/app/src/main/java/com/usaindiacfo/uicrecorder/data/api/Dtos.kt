@@ -224,6 +224,39 @@ data class Stats(
     /** Absent on servers before alerting (M1). */
     val throughput: Throughput? = null,
     val alertsEnabled: Boolean? = null,
+    /** Absent on servers before cost tracking (M2). */
+    val translation: TranslationStats? = null,
+)
+
+// ---- Claude translation spend (/api/translation/usage, PUT /api/settings/costs) ----
+
+@Serializable
+data class TranslationStats(
+    val month: String,
+    val spentUsd: Double = 0.0,
+    val budgetUsd: Double = 0.0,
+    val pct: Double = 0.0,
+    val capped: Boolean = false,
+)
+
+@Serializable
+data class TranslationUsage(
+    val month: String,
+    val spentUsd: Double = 0.0,
+    val budgetUsd: Double = 0.0,
+    val pct: Double = 0.0,
+    val capped: Boolean = false,
+    val translatedThisMonth: Int = 0,
+    val avgCostUsd: Double? = null,
+    val queuedJobs: Int = 0,
+    val sarvamOverflow: Boolean = false,
+)
+
+/** Null fields are not sent; the server applies only what is present. */
+@Serializable
+data class CostSettingsPatch(
+    val translateBudgetUsd: Double? = null,
+    val sarvamOverflow: Boolean? = null,
 )
 
 /** Transcription throughput and backlog ETA from GET /api/stats. */

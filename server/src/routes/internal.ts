@@ -1,15 +1,18 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { touchWorker } from "../alerts/checks.js";
+import { getCostSettings, translateCapped } from "../translation/cost.js";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
-import { JOB_KINDS, claimJobs, completeJob, completeTranslation, failJob, heartbeatJob } from "../jobs/queue.js";
+import { JOB_KINDS, claimJobs, claimOverflowJobs, completeJob, completeTranslation, failJob, heartbeatJob } from "../jobs/queue.js";
 
 const Claim = z.object({
   workerId: z.string().min(1).max(100),
   limit: z.number().int().min(1).max(20).default(1),
   // Old workers send no kinds and only get transcription jobs.
   kinds: z.array(z.enum(JOB_KINDS)).min(1).max(JOB_KINDS.length).default(["transcribe"]),
+  // The worker's transcription provider. "sarvam" workers only get Fireflies-budget overflow jobs.
+  provider: z.string().max(50).optional(),
 });
 
 const Translation = z.object({
@@ -44,9 +47,22 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   const auth = { preHandler: requireWorker(deps), config: { rateLimit: false as const } };
 
   app.post("/internal/jobs/claim", auth, async (req) => {
-    const { workerId, limit, kinds } = Claim.parse(req.body);
+    const { workerId, limit, provider, kinds: asked } = Claim.parse(req.body);
+    let kinds = asked;
     await touchWorker(deps.db, workerId);
-    const jobs = await claimJobs(deps.db, workerId, limit, kinds);
+    // Claude monthly cap: translate jobs stay QUEUED until next month or a higher cap.
+    if (kinds.includes("translate") && (await translateCapped(deps.db))) kinds = kinds.filter((k) => k !== "translate");
+    let jobs: Awaited<ReturnType<typeof claimJobs>> = [];
+    if (provider === "sarvam") {
+      // Never hand ordinary jobs to the paid overflow provider; translate jobs are still fine.
+      if (kinds.includes("transcribe") && (await getCostSettings(deps.db)).sarvamOverflow) {
+        jobs = await claimOverflowJobs(deps.db, workerId, limit);
+      }
+      const other = kinds.filter((k) => k !== "transcribe");
+      if (other.length > 0 && jobs.length < limit) jobs = jobs.concat(await claimJobs(deps.db, workerId, limit - jobs.length, other));
+    } else if (kinds.length > 0) {
+      jobs = await claimJobs(deps.db, workerId, limit, kinds);
+    }
     if (jobs.length === 0) return { jobs: [] };
     const calls = await deps.db.call.findMany({
       where: { id: { in: jobs.map((j) => j.callId) } },
@@ -114,7 +130,6 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/translation", resultOpts, async (req, reply) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const body = Translation.parse(req.body);
-    if (body.usage) req.log.info({ jobId, model: body.model, usage: body.usage }, "translation usage");
     if (!(await completeTranslation(deps.db, jobId, body.workerId, body))) {
       throw new HttpError(409, "Job is not a translate job locked by this worker");
     }
