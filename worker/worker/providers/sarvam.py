@@ -80,13 +80,17 @@ class SarvamProvider:
                 words = ts.get("words") or []
                 starts = ts.get("start_time_seconds") or []
                 ends = ts.get("end_time_seconds") or []
+                # One segment per chunk (the translator sends one line per segment); word times, when
+                # present, narrow the segment to the speech and are kept as detail.
+                if not text:
+                    continue
+                seg: dict = {"start": offset, "end": offset + CHUNK_S, "text": text}
                 if words and len(words) == len(starts) == len(ends):
-                    for w, s, e in zip(words, starts, ends):
-                        if str(w).strip():
-                            segments.append({"start": round(offset + float(s), 2), "end": round(offset + float(e), 2),
-                                             "text": str(w).strip()})
-                elif text:
-                    segments.append({"start": offset, "end": offset + CHUNK_S, "text": text})
+                    seg["start"] = round(offset + float(starts[0]), 2)
+                    seg["end"] = round(offset + float(ends[-1]), 2)
+                    seg["words"] = [{"start": round(offset + float(s), 2), "end": round(offset + float(e), 2),
+                                     "text": str(w).strip()} for w, s, e in zip(words, starts, ends) if str(w).strip()]
+                segments.append(seg)
         language_out = max(detected, key=detected.get) if detected else None
-        return Transcript(text="\n".join(s["text"] for s in segments) or "\n".join(texts),
+        return Transcript(text="\n".join(texts),
                           provider=f"{self.name}:{self.model}", language=language_out, segments=segments)

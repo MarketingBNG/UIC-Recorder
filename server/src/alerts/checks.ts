@@ -148,7 +148,8 @@ const CLAUDE_THRESHOLDS = [80, 100] as const;
 async function claudeSpendChecks(db: Db, now: Date): Promise<CheckResult[]> {
   const u = await translationUsage(db, now);
   return CLAUDE_THRESHOLDS.map((t) => {
-    const firing = u.pct >= t;
+    // 100% follows the same unrounded test that pauses translations, so the alert never says "paused" early.
+    const firing = t === 100 ? u.capped : u.pct >= t;
     const tail = t === 100 ? " English translations are paused until next month or a higher cap." : "";
     return {
       key: `claude-spend-${t}`,

@@ -114,7 +114,7 @@ function AdminForm({ u }: { u: TranslationUsage }) {
           aria-describedby="tr-budget-hint"
         />
         <p id="tr-budget-hint" className={`hint ${budgetOk ? "" : "text-red-600 dark:text-red-400"}`}>
-          English translations wait once this month's spend reaches the cap. A running batch can go over by one batch.
+          English translations wait once this month's spend reaches the cap. Jobs already started still finish, so spend can go a little over (one batch per running worker).
         </p>
       </div>
       <Toggle

@@ -61,7 +61,8 @@ def pick_model(texts: list[str]) -> str:
 
 
 class TranslationError(Exception):
-    pass
+    """`usage` (when set) is what Claude charged for the failed attempts, reported so the monthly cap counts it."""
+    usage: dict | None = None
 
 
 def plan(segments: list[dict], model: str | None = None) -> tuple[list[int], list[str], str]:
@@ -126,6 +127,8 @@ def translate_segments(client, segments: list[dict], model: str | None = None) -
             total = {"model": m, "input_tokens": sum(u["input_tokens"] for u in tried),
                      "output_tokens": sum(u["output_tokens"] for u in tried), "attempts": len(tried)}
             return merge(segments, idx, en), total
+    err.usage = {"model": tried[-1]["model"], "input_tokens": sum(u["input_tokens"] for u in tried),
+                 "output_tokens": sum(u["output_tokens"] for u in tried)}
     raise err
 
 

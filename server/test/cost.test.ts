@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { evaluateChecks } from "../src/alerts/checks.js";
+import type { LocalStorage } from "../src/storage/local.js";
 import { claudeCostUsd, monthSpendUsd, translationUsage } from "../src/translation/cost.js";
 import { setupTestApp, sha256, uniqueEmail } from "./helpers.js";
 
@@ -159,5 +161,35 @@ describe("Sarvam overflow claim", () => {
     // Workers without a provider behave as before.
     const plain = (await claim({ workerId: "w1", limit: 10 })).json().jobs;
     expect(plain.map((j: { jobId: string }) => j.jobId)).toEqual([ordinary.id]);
+  });
+});
+
+describe("cost review fixes", () => {
+  it("counts the spend of a failed translate attempt that reports usage", async () => {
+    const job = await translateJob("RUNNING");
+    const res = await t.app.inject({
+      method: "POST",
+      url: `/internal/jobs/${job.id}/result`,
+      headers: t.workerHeaders,
+      payload: {
+        ok: false, workerId: "w1", error: "TranslationError: expected 2 lines", retryable: true,
+        model: "claude-opus-5-5", usage: { inputTokens: 1_000_000, outputTokens: 0, batch: false },
+      },
+    });
+    expect(res.statusCode).toBe(204);
+    expect(await monthSpendUsd(t.db)).toBeCloseTo(4);
+    expect((await t.db.job.findUniqueOrThrow({ where: { id: job.id } })).status).toBe("QUEUED");
+  });
+
+  it("the 100% alert fires only when translations are actually paused", async () => {
+    await setCosts({ translateBudgetUsd: 100 });
+    const job = await translateJob();
+    await t.db.job.update({ where: { id: job.id }, data: { status: "DONE", costUsd: 99.96, costAt: new Date() } });
+    const disk = { diskUsage: async () => ({ totalBytes: 100, freeBytes: 90 }) } as unknown as LocalStorage;
+    const at = async () => (await evaluateChecks(t.db, disk)).find((c) => c.key === "claude-spend-100");
+    expect((await translationUsage(t.db)).pct).toBe(100);
+    expect((await at())?.firing).toBe(false);
+    await t.db.job.update({ where: { id: job.id }, data: { costUsd: 100 } });
+    expect((await at())?.firing).toBe(true);
   });
 });

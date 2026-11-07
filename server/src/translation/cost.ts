@@ -68,7 +68,10 @@ export async function translateCapped(db: Tx, now = new Date()): Promise<boolean
   return spent >= s.translateBudgetUsd;
 }
 
-/** Dashboard / app card. A running batch can overshoot the cap by up to one batch. */
+/**
+ * Dashboard / app card. The cap is soft: spend is recorded when a job finishes, so jobs already handed out
+ * (every worker's running batch and live calls, possibly several batches at once) can push spend past it.
+ */
 export async function translationUsage(db: Db, now = new Date()) {
   const [s, spent, queued, monthJobs] = await Promise.all([
     getCostSettings(db),

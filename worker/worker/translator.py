@@ -165,8 +165,14 @@ class Translator:
     # ---- work ----
 
     def _fail(self, job_id: str, e: BaseException) -> None:
+        payload: dict = {"ok": False, "error": f"{type(e).__name__}: {e}"[:2000], "retryable": True}
+        if usage := getattr(e, "usage", None):
+            # Claude already charged for these tokens; the API adds them to the monthly spend.
+            payload["model"] = usage.get("model") or self.settings.translate_model
+            payload["usage"] = {"inputTokens": usage.get("input_tokens", 0), "outputTokens": usage.get("output_tokens", 0),
+                                "batch": False}
         try:
-            self.api.post_result(job_id, {"ok": False, "error": f"{type(e).__name__}: {e}"[:2000], "retryable": True})
+            self.api.post_result(job_id, payload)
         except Exception:
             log.exception("could not report translate failure", job_id=job_id)
 

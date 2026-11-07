@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Sarvam transcripts came out one word per line (M2 review)
+- **Cause:** each Sarvam word timestamp became its own segment, and the text was joined from segments, so Claude translated word by word.
+- **Fix:** one segment per 25 s chunk (word times kept under `words`), text from the chunk transcripts.
+
+## Claude spend from failed translate attempts was not counted (M2 review)
+- **Cause:** cost was written only on a successful translation post.
+- **Fix:** failed attempts send `model` + `usage` with the failure result; the API adds that cost to the job.
+
 ## Shell edit refused by the command safety check (local dev)
 - **Cause:** an inline Python heredoc containing `$` template strings could not be parsed safely by the Bash tool.
 - **Fix:** wrote the edit script to a file and ran it with `python <file>`.

@@ -4,7 +4,7 @@ import { touchWorker } from "../alerts/checks.js";
 import { getCostSettings, translateCapped } from "../translation/cost.js";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
-import { JOB_KINDS, claimJobs, claimOverflowJobs, completeJob, completeTranslation, failJob, heartbeatJob } from "../jobs/queue.js";
+import { JOB_KINDS, claimJobs, claimOverflowJobs, completeJob, completeTranslation, failJob, heartbeatJob, recordTranslationCost } from "../jobs/queue.js";
 
 const Claim = z.object({
   workerId: z.string().min(1).max(100),
@@ -15,14 +15,14 @@ const Claim = z.object({
   provider: z.string().max(50).optional(),
 });
 
+const Usage = z.object({ inputTokens: z.number().int().min(0), outputTokens: z.number().int().min(0), batch: z.boolean() });
+
 const Translation = z.object({
   workerId: z.string().min(1).max(100),
   model: z.string().min(1).max(100),
   textEn: z.string().max(4_000_000),
   segments: z.array(z.record(z.string(), z.unknown())).max(100_000),
-  usage: z
-    .object({ inputTokens: z.number().int().min(0), outputTokens: z.number().int().min(0), batch: z.boolean() })
-    .optional(),
+  usage: Usage.optional(),
 });
 
 const Result = z.discriminatedUnion("ok", [
@@ -39,6 +39,9 @@ const Result = z.discriminatedUnion("ok", [
     workerId: z.string().max(100),
     error: z.string().max(5000),
     retryable: z.boolean().default(true),
+    // A failed translate attempt that Claude already charged for (counts toward the monthly cap).
+    model: z.string().min(1).max(100).optional(),
+    usage: Usage.optional(),
   }),
 ]);
 
@@ -120,6 +123,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/result", resultOpts, async (req, reply) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const body = Result.parse(req.body);
+    if (!body.ok && body.usage && body.model) await recordTranslationCost(deps.db, jobId, body.model, body.usage);
     const ok = body.ok
       ? await completeJob(deps.db, jobId, body.workerId, body, { translate: deps.config.TRANSLATE_ENABLED })
       : await failJob(deps.db, jobId, body.workerId, body.error, body.retryable);

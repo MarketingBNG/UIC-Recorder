@@ -82,3 +82,11 @@ def test_dropped_line_retries_then_falls_back_to_opus():
     assert [s["en"] for s in out] == ["Hello", "Okay"]
     assert [k["model"] for k in c.calls] == [SONNET, SONNET, OPUS]
     assert usage["model"] == OPUS and usage["attempts"] == 3 and usage["input_tokens"] == 30
+
+
+def test_failed_attempts_carry_the_usage_already_paid_for():
+    c = FakeClient(["only one"])
+    with pytest.raises(TranslationError) as e:
+        translate_segments(c, [{"text": "नमस्ते"}, {"text": "ठीक है"}])
+    assert len(c.calls) == 3
+    assert e.value.usage == {"model": OPUS, "input_tokens": 30, "output_tokens": 15}

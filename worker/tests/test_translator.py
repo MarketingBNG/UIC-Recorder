@@ -9,6 +9,7 @@ import respx
 import worker.translator as tr
 from worker.config import Settings
 from worker.main import Api
+from worker.translate import TranslationError
 from worker.translator import Translator, segments_of
 
 ENV = {"WORKER_TOKEN": "w" * 40, "API_URL": "http://api.test", "WORKER_ID": "t1"}
@@ -266,3 +267,13 @@ def test_claim_never_asks_for_more_than_server_limit():
     api = FakeApi([], {})
     Translator(api, FakeClient(), Settings.from_env(KEYED)).tick()
     assert api.claims and all(limit <= 20 for limit, _ in api.claims)
+
+
+def test_failure_after_paid_reply_reports_usage():
+    err = TranslationError("expected 2 lines, got 1")
+    err.usage = {"model": "claude-opus-5-5", "input_tokens": 30, "output_tokens": 15}
+    api = FakeApi([], {})
+    Translator(api, FakeClient(), Settings.from_env(KEYED))._fail("j1", err)
+    r = api.results["j1"]
+    assert r["ok"] is False and r["model"] == "claude-opus-5-5"
+    assert r["usage"] == {"inputTokens": 30, "outputTokens": 15, "batch": False}

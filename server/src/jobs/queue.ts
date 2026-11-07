@@ -176,16 +176,22 @@ export interface TranslationResult {
  * Stores the English version for a translate job this worker holds. Returns false if the lock was lost.
  * The Claude cost is recorded on the job either way: the tokens were paid for even if the result is discarded.
  */
-export async function completeTranslation(db: Db, jobId: string, workerId: string, result: TranslationResult) {
-  const cost = result.usage
-    ? claudeCostUsd(result.model, result.usage.inputTokens, result.usage.outputTokens, result.usage.batch)
-    : null;
+/**
+ * Adds a translate attempt's Claude cost to its job (a retried job pays again). Called for successful and
+ * failed attempts alike: the tokens were paid for either way. Returns the cost, or null without usage.
+ */
+export async function recordTranslationCost(db: Db, jobId: string, model: string, usage: TranslationUsage | undefined) {
+  const cost = usage ? claudeCostUsd(model, usage.inputTokens, usage.outputTokens, usage.batch) : null;
   if (cost !== null) {
-    // Adds to any earlier attempt's cost (a retried job pays again).
     await db.$executeRaw`
       UPDATE "jobs" SET "cost_usd" = coalesce("cost_usd", 0) + ${cost}, "cost_at" = now()
       WHERE "id" = ${jobId}::uuid AND "kind" = 'translate'`;
   }
+  return cost;
+}
+
+export async function completeTranslation(db: Db, jobId: string, workerId: string, result: TranslationResult) {
+  const cost = await recordTranslationCost(db, jobId, result.model, result.usage);
   return db.$transaction(async (tx) => {
     const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "translate" } });
     if (!job) return false;

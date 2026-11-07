@@ -56,11 +56,11 @@ def test_transcribe_chunks_and_offsets_timestamps(tmp_path):
     assert t.provider == "sarvam:saaras:v3"
     assert t.language == "hi-IN"
     assert t.segments == [
-        {"start": 0.0, "end": 2.0, "text": "namaste ji."},
-        {"start": 2.5, "end": 6.0, "text": "GST file ho gaya?"},
+        {"start": 0.0, "end": 6.0, "text": "namaste ji. GST file ho gaya?",
+         "words": [{"start": 0.0, "end": 2.0, "text": "namaste ji."}, {"start": 2.5, "end": 6.0, "text": "GST file ho gaya?"}]},
         {"start": CHUNK_S, "end": 2 * CHUNK_S, "text": "haan kal bhej dunga"},
     ]
-    assert t.text.splitlines()[-1] == "haan kal bhej dunga"
+    assert t.text.splitlines() == ["namaste ji. GST file ho gaya?", "haan kal bhej dunga"]
 
 
 @respx.mock
