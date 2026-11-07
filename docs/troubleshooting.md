@@ -2,6 +2,10 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Alert tests saw extra failed jobs from other tests (local dev)
+- **Cause:** the new `failed_attempt_at` column wasn't cleared between tests, so failures from earlier tests counted in the hour window.
+- **Fix:** the alerts test `beforeEach` now clears `failed_attempt_at` along with `finished_at`.
+
 ## Bash heredoc failed with "unexpected EOF while looking for matching `'`" (local dev)
 - **Cause:** a long test file written through a shell heredoc contained characters the Git Bash wrapper mis-parsed.
 - **Fix:** wrote the file with the editor instead of `cat <<'EOF'`.

@@ -41,7 +41,7 @@ afterAll(async () => {
 // Other test files share the database: neutralize their jobs, devices and Fireflies state.
 beforeEach(async () => {
   await t.db.job.updateMany({ where: { status: { in: ["QUEUED", "RUNNING", "WAITING_BUDGET"] } }, data: { status: "DONE" } });
-  await t.db.job.updateMany({ data: { finishedAt: null } });
+  await t.db.job.updateMany({ data: { finishedAt: null, failedAttemptAt: null } });
   await t.db.device.updateMany({ data: { lastSeenAt: new Date() } });
   await t.db.firefliesReservation.deleteMany();
   await t.db.setting.updateMany({ data: { fireflies: {} } });
@@ -65,7 +65,14 @@ async function newCall(durationS: number | null = 120, fileSize?: number) {
 async function finishedJob(status: "DONE" | "FAILED", finishedAt: Date, seconds = 60, lastError?: string) {
   const call = await newCall();
   return t.db.job.create({
-    data: { callId: call.id, status, startedAt: new Date(finishedAt.getTime() - seconds * 1000), finishedAt, lastError: lastError ?? null },
+    data: {
+      callId: call.id,
+      status,
+      startedAt: new Date(finishedAt.getTime() - seconds * 1000),
+      finishedAt,
+      failedAttemptAt: status === "FAILED" && !lastError ? finishedAt : null,
+      lastError: lastError ?? null,
+    },
   });
 }
 
@@ -143,6 +150,58 @@ describe("checks", () => {
     expect(c.sent.at(-1)).toMatch(/^Resolved: Worker/);
   });
 
+  it("worker down for over a week keeps alerting (newest sighting is never pruned)", async () => {
+    const c = fakeCliq();
+    const now = new Date();
+    await touchWorker(t.db, "dead-worker", new Date(now.getTime() - 15 * MIN));
+    await runChecks(t.db, disk(10), c.send, now);
+    const later = new Date(now.getTime() + 8 * 24 * HOUR);
+    await runChecks(t.db, disk(10), c.send, later);
+    await runChecks(t.db, disk(10), c.send, later);
+    expect(await t.db.workerSeen.count()).toBe(1);
+    expect(c.sent.some((m) => m.startsWith("Resolved: Worker"))).toBe(false);
+  });
+
+  it("disk probe with zero total bytes is ignored", async () => {
+    const c = fakeCliq();
+    const zero = { diskUsage: async () => ({ totalBytes: 0, freeBytes: 0 }) } as unknown as LocalStorage;
+    await runChecks(t.db, disk(85), c.send);
+    await runChecks(t.db, zero, c.send);
+    expect(c.sent).toEqual([expect.stringMatching(/^Server disk 85% full/)]);
+  });
+
+  it("retried failures count toward the failure rate", async () => {
+    const c = fakeCliq();
+    const now = new Date();
+    for (let i = 0; i < 9; i++) await finishedJob("DONE", new Date(now.getTime() - 10 * MIN));
+    for (let i = 0; i < 3; i++) {
+      const call = await newCall();
+      await t.db.job.create({ data: { callId: call.id, status: "QUEUED", attempts: 1, runAfter: new Date(now.getTime() + HOUR), failedAttemptAt: new Date(now.getTime() - 5 * MIN) } });
+    }
+    await runChecks(t.db, disk(10), c.send, now);
+    expect(c.sent).toEqual([expect.stringMatching(/^Job failures: 3 of 12/)]);
+  });
+
+  it("queue stall ignores translate jobs", async () => {
+    const c = fakeCliq();
+    const now = new Date();
+    const call = await newCall();
+    await t.db.job.create({ data: { callId: call.id, runAfter: new Date(now.getTime() - 3 * HOUR) } });
+    // A finished translate job doesn't hide the stalled transcribe queue.
+    await t.db.job.create({ data: { callId: call.id, kind: "translate", status: "DONE", finishedAt: new Date(now.getTime() - MIN) } });
+    await runChecks(t.db, disk(10), c.send, now);
+    expect(c.sent).toEqual([expect.stringMatching(/^Queue not moving: 1 transcription jobs/)]);
+    await t.db.job.updateMany({ where: { callId: call.id }, data: { status: "DONE" } });
+
+    // A translate-only stall doesn't fire.
+    const c2 = fakeCliq();
+    await t.db.alertState.deleteMany();
+    await t.db.job.create({ data: { callId: call.id, kind: "translate", runAfter: new Date(now.getTime() - 3 * HOUR) } });
+    await runChecks(t.db, disk(10), c2.send, now);
+    expect(c2.sent).toEqual([]);
+    await t.db.job.updateMany({ where: { callId: call.id }, data: { status: "DONE" } });
+  });
+
   it("no worker ever seen does not alert", async () => {
     const c = fakeCliq();
     await runChecks(t.db, disk(10), c.send);
@@ -198,6 +257,13 @@ describe("checks", () => {
     expect(c.sent).toHaveLength(1);
     expect(c.sent[0]).toMatch(/^1 phone\(s\) not seen/);
     expect(c.sent[0]).toContain("Redmi 9");
+    // A phone that registered 50 h ago and never checked in is flagged too.
+    const nev = await t.db.device.create({ data: { userId, installId: randomUUID(), model: "Never", lastSeenAt: null } });
+    await t.db.device.update({ where: { id: nev.id }, data: { createdAt: old } });
+    await t.db.alertState.deleteMany();
+    await runChecks(t.db, disk(10), c.send, now);
+    expect(c.sent.at(-1)).toMatch(/^2 phone\(s\) not seen/);
+    expect(c.sent.at(-1)).toContain("Never");
     await t.db.device.updateMany({ where: { userId }, data: { revokedAt: now } });
   });
 

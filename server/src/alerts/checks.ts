@@ -35,11 +35,13 @@ export async function touchWorker(db: Db, workerId: string, now = new Date()) {
     WHERE "worker_seen"."last_seen_at" < ${new Date(now.getTime() - 30_000)}`;
 }
 
-async function workerCheck(db: Db, now: Date): Promise<CheckResult> {
+async function workerCheck(db: Db, now: Date): Promise<CheckResult | null> {
   // Worker IDs change on restart, so the newest sighting of any worker counts.
   const newest = await db.workerSeen.findFirst({ orderBy: { lastSeenAt: "desc" } });
-  const silent = !!newest && now.getTime() - newest.lastSeenAt.getTime() > WORKER_SILENT_MS;
-  const mins = newest ? Math.round((now.getTime() - newest.lastSeenAt.getTime()) / MIN) : 0;
+  // No worker has ever polled: unknown, so leave the alert state alone.
+  if (!newest) return null;
+  const silent = now.getTime() - newest.lastSeenAt.getTime() > WORKER_SILENT_MS;
+  const mins = Math.round((now.getTime() - newest.lastSeenAt.getTime()) / MIN);
   return {
     key: "worker-down",
     firing: silent,
@@ -73,13 +75,13 @@ async function queueChecks(db: Db, now: Date): Promise<CheckResult[]> {
   const total = hour.done + hour.failed;
   const failing = total >= FAILURE_MIN_JOBS && hour.failureRatePct > FAILURE_RATE_PCT;
 
-  // Stalled: runnable QUEUED jobs (not budget-deferred, not in backoff) have waited 2 h
-  // and nothing finished meanwhile.
+  // Stalled: runnable QUEUED transcribe jobs (not budget-deferred, not in backoff) have waited
+  // 2 h and no transcribe job finished meanwhile. Translate jobs are ignored both ways.
   const stallCutoff = new Date(now.getTime() - QUEUE_STALL_MS);
   const [oldestRunnable, finishedRecently, runnable] = await Promise.all([
-    db.job.findFirst({ where: { status: "QUEUED", runAfter: { lte: stallCutoff } }, select: { id: true } }),
-    db.job.count({ where: { status: "DONE", finishedAt: { gt: stallCutoff, lte: now } } }),
-    db.job.count({ where: { status: "QUEUED", runAfter: { lte: now } } }),
+    db.job.findFirst({ where: { kind: "transcribe", status: "QUEUED", runAfter: { lte: stallCutoff } }, select: { id: true } }),
+    db.job.count({ where: { kind: "transcribe", status: "DONE", finishedAt: { gt: stallCutoff, lte: now } } }),
+    db.job.count({ where: { kind: "transcribe", status: "QUEUED", runAfter: { lte: now } } }),
   ]);
   const stalled = !!oldestRunnable && finishedRecently === 0;
   return [
@@ -94,7 +96,7 @@ async function queueChecks(db: Db, now: Date): Promise<CheckResult[]> {
       key: "queue-stalled",
       firing: stalled,
       text: stalled
-        ? `Queue not moving: ${runnable} jobs are queued and none finished in the last ${QUEUE_STALL_MS / HOUR} h.`
+        ? `Queue not moving: ${runnable} transcription jobs are queued and none finished in the last ${QUEUE_STALL_MS / HOUR} h.`
         : "Queue is moving again.",
     },
   ];
@@ -103,6 +105,7 @@ async function queueChecks(db: Db, now: Date): Promise<CheckResult[]> {
 async function diskCheck(storage: LocalStorage): Promise<CheckResult | null> {
   try {
     const d = await storage.diskUsage();
+    if (!(d.totalBytes > 0)) return null; // bogus probe: leave the alert as it was
     const pct = Math.round((1 - d.freeBytes / d.totalBytes) * 100);
     const gb = (d.freeBytes / 1024 ** 3).toFixed(1);
     return {
@@ -116,9 +119,15 @@ async function diskCheck(storage: LocalStorage): Promise<CheckResult | null> {
 }
 
 async function phoneCheck(db: Db, now: Date): Promise<CheckResult> {
+  const cutoff = new Date(now.getTime() - PHONE_SILENT_MS);
   const silent = await db.device.findMany({
-    where: { revokedAt: null, user: { active: true }, lastSeenAt: { lt: new Date(now.getTime() - PHONE_SILENT_MS) } },
-    orderBy: { lastSeenAt: "asc" },
+    where: {
+      revokedAt: null,
+      user: { active: true },
+      // Includes phones that registered but never checked in.
+      OR: [{ lastSeenAt: { lt: cutoff } }, { lastSeenAt: null, createdAt: { lt: cutoff } }],
+    },
+    orderBy: { lastSeenAt: { sort: "asc", nulls: "first" } },
     select: { model: true, user: { select: { name: true, email: true } } },
   });
   const names = silent.slice(0, 10).map((d) => `${d.user.name ?? d.user.email} (${d.model ?? "phone"})`);
@@ -157,7 +166,10 @@ export async function runChecks(db: Db, storage: LocalStorage, send: AlertSender
     if (c.firing) await sendAlert(db, send, c.key, c.text, now, { repeat: c.repeat ?? true });
     else await resolveAlert(db, send, c.key, c.text, now);
   }
-  await db.workerSeen.deleteMany({ where: { lastSeenAt: { lt: new Date(now.getTime() - WORKER_SEEN_KEEP_MS) } } });
+  // Prune old worker IDs but always keep the newest, so a long outage keeps alerting.
+  await db.$executeRaw`
+    DELETE FROM "worker_seen" WHERE "last_seen_at" < ${new Date(now.getTime() - WORKER_SEEN_KEEP_MS)}
+      AND "worker_id" NOT IN (SELECT "worker_id" FROM "worker_seen" ORDER BY "last_seen_at" DESC LIMIT 1)`;
   return results;
 }
 

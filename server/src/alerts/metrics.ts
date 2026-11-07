@@ -4,16 +4,21 @@ import { SUPERSEDED } from "../jobs/queue.js";
 
 const HOUR = 3600_000;
 
-/** Finished transcribe jobs over a window: throughput, failure rate and time per job. */
+/**
+ * Transcribe jobs over a window: throughput and time per job from jobs that finished DONE,
+ * failures from any failed attempt (retries included) so a broken provider shows at once.
+ */
 export async function jobStats(db: Db, windowMs: number, now = new Date(), kind = "transcribe") {
   const since = new Date(now.getTime() - windowMs);
   const rows = await db.$queryRaw<{ done: bigint; failed: bigint; avg_s: number | null }[]>`
     SELECT
-      count(*) FILTER (WHERE "status" = 'DONE') AS "done",
-      count(*) FILTER (WHERE "status" = 'FAILED') AS "failed",
+      count(*) FILTER (WHERE "status" = 'DONE' AND "finished_at" > ${since} AND "finished_at" <= ${now}) AS "done",
+      count(*) FILTER (WHERE "failed_attempt_at" > ${since} AND "failed_attempt_at" <= ${now}) AS "failed",
       avg(extract(epoch FROM "finished_at" - "started_at")) FILTER (WHERE "status" = 'DONE' AND "started_at" IS NOT NULL)::float8 AS "avg_s"
     FROM "jobs"
-    WHERE "kind" = ${kind} AND "finished_at" > ${since} AND "finished_at" <= ${now}
+    WHERE "kind" = ${kind}
+      AND (("finished_at" > ${since} AND "finished_at" <= ${now})
+        OR ("failed_attempt_at" > ${since} AND "failed_attempt_at" <= ${now}))
       AND coalesce("last_error", '') <> ${SUPERSEDED}`;
   const done = Number(rows[0]?.done ?? 0);
   const failed = Number(rows[0]?.failed ?? 0);

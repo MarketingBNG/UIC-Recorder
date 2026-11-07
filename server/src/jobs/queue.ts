@@ -176,6 +176,8 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
         lockedBy: null,
         runAfter: giveUp ? job.runAfter : new Date(Date.now() + backoffMs),
         finishedAt: giveUp ? new Date() : null,
+        // Every failed attempt, retried or not, for the hourly failure-rate alert.
+        failedAttemptAt: new Date(),
       },
     });
     // A translate job never changes the call: it stays TRANSCRIBED.

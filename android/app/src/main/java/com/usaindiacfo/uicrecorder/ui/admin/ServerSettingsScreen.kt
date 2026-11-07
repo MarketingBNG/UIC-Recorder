@@ -250,9 +250,11 @@ private fun TestAlertSection() {
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<String?>(null) }
+    // null until /api/stats answers; matches the dashboard, which only disables on an explicit false.
+    var enabled by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(Unit) { apiCall { api.stats() }.onSuccess { enabled = it.alertsEnabled } }
     Text("Alerts", style = MaterialTheme.typography.labelLarge)
-    Text("Zoho Cliq gets a message when the worker stops, Fireflies blocks us, the disk passes 80%, jobs fail or a phone stops syncing.",
-        style = MaterialTheme.typography.bodySmall)
+    Text(alertsDescription(enabled), style = MaterialTheme.typography.bodySmall)
     OutlinedButton(
         onClick = {
             busy = true; result = null
@@ -263,10 +265,14 @@ private fun TestAlertSection() {
                 busy = false
             }
         },
-        enabled = !busy,
+        enabled = !busy && enabled != false,
     ) { Text(if (busy) "Sending…" else "Send test alert") }
     result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
 }
+
+internal fun alertsDescription(enabled: Boolean?): String =
+    if (enabled == false) "Off: set CLIQ_WEBHOOK_URL on the server to get Zoho Cliq alerts."
+    else "Zoho Cliq gets a message when the worker stops, Fireflies blocks us, the disk passes 80%, jobs fail or a phone stops syncing."
 
 internal fun backfillMessage(queued: Int): String = when (queued) {
     0 -> "Nothing to translate. Every transcript already has English or is queued."

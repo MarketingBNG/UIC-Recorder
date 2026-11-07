@@ -187,6 +187,8 @@ model Job {
   // Set when claimed / when DONE or FAILED; used for throughput metrics.
   startedAt  DateTime? @map("started_at")
   finishedAt DateTime? @map("finished_at")
+  // Last failed attempt (retried or final); feeds the failure-rate alert.
+  failedAttemptAt DateTime? @map("failed_attempt_at")
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
@@ -194,6 +196,7 @@ model Job {
 
   @@index([status, priority(sort: Desc), createdAt])
   @@index([finishedAt])
+  @@index([failedAttemptAt])
   @@map("jobs")
 }
 
