@@ -105,9 +105,14 @@ fun SetupScreen(onDone: () -> Unit) {
 
         Step(
             done = contactsOk && notifOk,
-            optional = true,
-            title = "Contacts and notifications (optional)",
-            body = "Contacts show names instead of numbers. Notifications report upload problems.",
+            // Business-only mode needs Contacts to tell personal calls apart; those recordings wait until it is allowed.
+            optional = !config.businessOnly || contactsOk,
+            title = if (config.businessOnly) "Contacts and notifications" else "Contacts and notifications (optional)",
+            body = if (config.businessOnly && !contactsOk) {
+                "Your admin turned on business calls only. Allow Contacts so calls with your saved personal contacts are skipped; until then most calls wait to upload."
+            } else {
+                "Contacts show names instead of numbers. Notifications report upload problems."
+            },
         ) {
             OutlinedButton(onClick = { permLauncher.launch(SetupChecks.optionalPermissions.toTypedArray()) }) { Text("Allow") }
         }

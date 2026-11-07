@@ -4,6 +4,7 @@ import path from "node:path";
 import { z } from "zod";
 import { requireDevice } from "../auth/guards.js";
 import { HttpError, currentDevice, currentUser, type Deps } from "../context.js";
+import { hashKey } from "../privacy/clientNumbers.js";
 import { getSettings } from "../settings.js";
 
 const Heartbeat = z.object({
@@ -21,6 +22,15 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
     const user = currentUser(req);
     const { deviceConfig } = await getSettings(deps.db);
     return { ...deviceConfig, excludedNumbers: user.excludedNumbers };
+  });
+
+  /**
+   * Business-only mode: sha256 of each client-list number key (last 10 digits), never the numbers themselves.
+   * The phone uploads a call to a saved personal contact only when its number's hash is in this list.
+   */
+  app.get("/v1/device/client-numbers", auth, async () => {
+    const rows = await deps.db.clientNumber.findMany({ select: { key: true }, orderBy: { key: "asc" } });
+    return { hashes: rows.map((r) => hashKey(r.key)) };
   });
 
   app.post("/v1/device/heartbeat", auth, async (req, reply) => {

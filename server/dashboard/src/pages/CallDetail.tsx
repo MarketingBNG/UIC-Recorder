@@ -160,6 +160,10 @@ export function CallDetailPage() {
                     e.currentTarget.playbackRate = speed;
                   }}
                 />
+                {/* Downloads are recorded in the audit log. */}
+                <a className="btn-ghost mt-2 inline-flex text-sm" href={`/api/calls/${c.id}/audio?download=1`} download>
+                  Download recording
+                </a>
                 <div className="mt-3 flex flex-wrap items-center gap-2" role="group" aria-label="Playback speed">
                   <span className="text-xs text-slate-500">Speed</span>
                   {SPEEDS.map((s) => (
@@ -181,7 +185,11 @@ export function CallDetailPage() {
                 </div>
               </>
             ) : (
-              <p className="text-sm text-slate-500">No audio yet. The phone hasn't uploaded this recording.</p>
+              <p className="text-sm text-slate-500">
+                {c.audioDeletedAt
+                  ? `Audio deleted on ${formatWhen(c.audioDeletedAt)} by the retention setting. The transcript is kept.`
+                  : "No audio yet. The phone hasn't uploaded this recording."}
+              </p>
             )}
           </section>
 

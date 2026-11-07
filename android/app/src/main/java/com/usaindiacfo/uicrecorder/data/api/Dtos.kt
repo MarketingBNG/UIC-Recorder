@@ -156,6 +156,8 @@ data class CallDetail(
     val transcript: Transcript? = null,
     /** Some server builds report this next to the transcript instead of inside it; either counts. */
     val translationPending: Boolean = false,
+    /** Set when the server's retention setting deleted the audio (transcript kept). */
+    val audioDeletedAt: String? = null,
 )
 
 @Serializable data class CallCount(val calls: Int = 0)
@@ -347,6 +349,36 @@ data class FirefliesPatch(
 )
 
 @Serializable data class ErrorBody(val error: String? = null)
+
+// ---- Privacy (M3): client list, retention / PII settings, audit log ---------
+
+/** GET /v1/device/client-numbers: sha256 hex of each client number's key (see PrivacyFilter.key). */
+@Serializable data class ClientNumberHashes(val hashes: List<String> = emptyList())
+
+@Serializable data class ClientNumberDto(val id: String, val raw: String, val label: String? = null, val createdAt: String)
+@Serializable data class ClientNumberList(val items: List<ClientNumberDto> = emptyList(), val count: Int = 0)
+@Serializable data class AddClientNumber(val number: String, val label: String? = null)
+@Serializable data class ClientCsv(val csv: String)
+
+@Serializable
+data class ClientImportResult(val added: Int = 0, val updated: Int = 0, val rejected: Int = 0, val rejectedSample: List<String> = emptyList())
+
+/** retentionMonths null = keep audio forever (default). */
+@Serializable data class PrivacySettings(val retentionMonths: Int? = null, val maskPii: Boolean = false)
+
+/** [action] stays a String so new server actions never break decoding. */
+@Serializable
+data class AuditEntry(
+    val id: String,
+    val action: String,
+    val callId: String? = null,
+    val detail: JsonElement? = null,
+    val ip: String? = null,
+    val createdAt: String,
+    val user: UserRef? = null,
+)
+
+@Serializable data class AuditPage(val items: List<AuditEntry> = emptyList(), val nextCursor: String? = null)
 
 /** POST /api/admin/translate-backfill response. */
 @Serializable data class TranslateBackfill(val queued: Int = 0)

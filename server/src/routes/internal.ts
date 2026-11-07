@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { touchWorker } from "../alerts/checks.js";
 import { getCostSettings, translateCapped } from "../translation/cost.js";
+import { getPrivacySettings } from "../privacy/settings.js";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
 import { CompressQuery, storeCompressedAudio } from "../calls/compress.js";
@@ -79,6 +80,8 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
       await deps.db.call.updateMany({ where: { id: { in: transcribing } }, data: { status: "TRANSCRIBING" } });
     }
     const byId = new Map(calls.map((c) => [c.id, c]));
+    // Admin setting: the worker masks Aadhaar / card numbers before posting a transcript or translation.
+    const { maskPii } = await getPrivacySettings(deps.db);
     return {
       jobs: jobs.map((j) => ({
         jobId: j.id,
@@ -89,6 +92,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
         mimeType: byId.get(j.callId)?.mimeType ?? null,
         durationS: byId.get(j.callId)?.durationS ?? null,
         audioPath: `/internal/audio/${j.callId}`,
+        maskPii,
       })),
     };
   });

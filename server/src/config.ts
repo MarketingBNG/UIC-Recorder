@@ -49,6 +49,9 @@ const schema = z.object({
     .enum(["true", "false", "1", "0", ""])
     .default("false")
     .transform((v) => v === "true" || v === "1"),
+
+  // Audio uploads (PUT /v1/calls/:id/audio) allowed per phone per hour; extra ones get 429 and retry later.
+  UPLOAD_RATE_PER_HOUR: z.coerce.number().int().positive().default(600),
 });
 
 export type Config = z.infer<typeof schema>;

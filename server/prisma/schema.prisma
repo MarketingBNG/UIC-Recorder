@@ -57,6 +57,10 @@ enum AuditAction {
   DELETE
   USER_CHANGE
   DEVICE_REVOKE
+  // Milestone 3: privacy settings, client list edits, retention deletes.
+  SETTINGS_CHANGE
+  CLIENT_LIST_CHANGE
+  RETENTION_DELETE
 }
 
 model User {
@@ -140,6 +144,8 @@ model Call {
   // Set when the worker re-encoded the stored audio to small AAC (Milestone 2b); bytes freed on disk.
   compressedAt   DateTime?     @map("compressed_at")
   bytesSaved     BigInt?       @map("bytes_saved")
+  // Set when the retention job deleted the audio file (transcript kept).
+  audioDeletedAt DateTime?     @map("audio_deleted_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -223,6 +229,7 @@ model AuditLog {
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
   @@map("audit_log")
 }
 
@@ -235,6 +242,8 @@ model Setting {
   fireflies    Json?
   // Claude translation cap + Sarvam overflow switch (see src/translation/cost.ts).
   costs        Json?
+  // Retention + PII masking (see src/privacy/settings.ts).
+  privacy      Json?
   updatedAt    DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
@@ -286,4 +295,16 @@ model AlertState {
   resolvedAt DateTime? @map("resolved_at")
 
   @@map("alert_states")
+}
+
+// Business-only mode: numbers that always upload even when saved as a personal contact on the phone.
+// key = last 10 digits (or all digits when shorter), the same as the app's PrivacyFilter.key().
+model ClientNumber {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  key       String   @unique
+  raw       String
+  label     String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("client_numbers")
 }

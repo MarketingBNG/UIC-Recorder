@@ -2,7 +2,8 @@ import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireDevice } from "../auth/guards.js";
 import { CallMeta, CheckBody, knownHashes, registerCall, storeAudio } from "../calls/service.js";
-import { currentDevice, currentUser, type Deps } from "../context.js";
+import { HttpError, currentDevice, currentUser, type Deps } from "../context.js";
+import { WindowLimiter } from "../privacy/uploadLimit.js";
 import { ALLOWED_AUDIO_MIME } from "../storage/local.js";
 
 const CreateCall = CallMeta.extend({ source: z.enum(["LIVE", "BACKLOG"]).default("LIVE") });
@@ -26,7 +27,15 @@ export async function callRoutes(app: FastifyInstance, deps: Deps) {
     return reply.code(201).send({ ...r, uploadPath: `/v1/calls/${r.callId}/audio` });
   });
 
+  // Per-phone upload cap; the app treats 429 like a network error and retries later.
+  const uploads = new WindowLimiter(deps.config.UPLOAD_RATE_PER_HOUR, 3600_000);
+
   app.put<{ Params: { id: string } }>("/v1/calls/:id/audio", auth, async (req, reply) => {
+    const wait = uploads.take(currentDevice(req).id);
+    if (wait > 0) {
+      reply.header("retry-after", wait);
+      throw new HttpError(429, "Too many uploads from this phone; try again later");
+    }
     const r = await storeAudio(deps, req, currentUser(req).id, z.uuid().parse(req.params.id));
     return reply.code(r.alreadyUploaded ? 200 : 201).send(r);
   });

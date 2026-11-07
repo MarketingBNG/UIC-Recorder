@@ -11,7 +11,8 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.PrimaryScrollableTabRow
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -37,6 +38,8 @@ import com.usaindiacfo.uicrecorder.ui.admin.FirefliesBanner
 import com.usaindiacfo.uicrecorder.ui.admin.ServerSettingsScreen
 import com.usaindiacfo.uicrecorder.ui.admin.UsersScreen
 import com.usaindiacfo.uicrecorder.ui.calls.CallDetailScreen
+import com.usaindiacfo.uicrecorder.ui.admin.AuditScreen
+import com.usaindiacfo.uicrecorder.ui.admin.ClientListScreen
 import com.usaindiacfo.uicrecorder.ui.calls.CallsScreen
 import com.usaindiacfo.uicrecorder.ui.home.HomeScreen
 import com.usaindiacfo.uicrecorder.ui.settings.SettingsScreen
@@ -52,6 +55,8 @@ object Routes {
     const val ADMIN_USERS = "admin/users"
     const val ADMIN_DEVICES = "admin/devices"
     const val ADMIN_SETTINGS = "admin/settings"
+    const val ADMIN_CLIENTS = "admin/clients"
+    const val ADMIN_AUDIT = "admin/audit"
     const val SETTINGS = "settings"
 
     fun callDetail(id: String) = "callDetail/$id"
@@ -59,7 +64,7 @@ object Routes {
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
-private val ADMIN_ROUTES = listOf(Routes.ADMIN_USERS, Routes.ADMIN_DEVICES, Routes.ADMIN_SETTINGS)
+private val ADMIN_ROUTES = listOf(Routes.ADMIN_USERS, Routes.ADMIN_DEVICES, Routes.ADMIN_SETTINGS, Routes.ADMIN_CLIENTS, Routes.ADMIN_AUDIT)
 
 @Composable
 fun AppNavigation(container: AppContainer, nav: NavHostController = rememberNavController()) {
@@ -122,6 +127,10 @@ fun AppNavigation(container: AppContainer, nav: NavHostController = rememberNavC
             composable(Routes.ADMIN_USERS) { AdminTabs(user, route, nav) { UsersScreen() } }
             composable(Routes.ADMIN_DEVICES) { AdminTabs(user, route, nav) { DevicesScreen() } }
             composable(Routes.ADMIN_SETTINGS) { AdminTabs(user, route, nav) { ServerSettingsScreen() } }
+            composable(Routes.ADMIN_CLIENTS) { AdminTabs(user, route, nav) { ClientListScreen() } }
+            composable(Routes.ADMIN_AUDIT) {
+                AdminTabs(user, route, nav) { AuditScreen(onOpenCall = { id -> nav.navigate(Routes.callDetail(id)) }) }
+            }
             composable(Routes.SETTINGS) { SettingsScreen(onOpenSetup = { nav.navigate(Routes.SETUP) }) }
         }
     }
@@ -133,10 +142,14 @@ private fun AdminTabs(user: UserDto?, route: String?, nav: NavHostController, co
     val items = buildList {
         add(Routes.ADMIN_USERS to "Users")
         add(Routes.ADMIN_DEVICES to "Devices")
-        if (user?.isAdmin == true) add(Routes.ADMIN_SETTINGS to "Server")
+        if (user?.isAdmin == true) {
+            add(Routes.ADMIN_SETTINGS to "Server")
+            add(Routes.ADMIN_CLIENTS to "Clients")
+            add(Routes.ADMIN_AUDIT to "Audit")
+        }
     }
     Column(Modifier.fillMaxSize()) {
-        PrimaryTabRow(selectedTabIndex = items.indexOfFirst { it.first == route }.coerceAtLeast(0)) {
+        PrimaryScrollableTabRow(edgePadding = 0.dp, selectedTabIndex = items.indexOfFirst { it.first == route }.coerceAtLeast(0)) {
             items.forEach { (r, label) ->
                 Tab(selected = r == route, onClick = { if (r != route) nav.navigateTab(r) }, text = { Text(label) })
             }

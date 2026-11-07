@@ -9,6 +9,17 @@ import { compressionStats, queueCompressionBackfill, queueTranslationBackfill } 
 import { cliqSender } from "../alerts/cliq.js";
 import { throughput } from "../alerts/metrics.js";
 import { CostSettings, getCostSettings, saveCostSettings, translationUsage } from "../translation/cost.js";
+import { MAX_CLIENT_NUMBERS, MIN_KEY_DIGITS, importClientNumbers, numberKey, parseClientCsv } from "../privacy/clientNumbers.js";
+import { PrivacySettings, getPrivacySettings, savePrivacySettings } from "../privacy/settings.js";
+
+const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE"] as const;
+const AuditQuery = z.object({
+  action: z.enum(AUDIT_ACTIONS).optional(),
+  userId: z.uuid().optional(),
+  cursor: z.uuid().optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+const ClientNumberBody = z.object({ number: z.string().trim().min(1).max(40), label: z.string().trim().max(200).optional() });
 
 const ListQuery = z.object({
   q: z.string().trim().max(200).optional(),
@@ -138,7 +149,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     return { ...call, transcript, fileSize: call.fileSize?.toString() ?? null };
   });
 
-  /** Audio playback with HTTP Range support (seeking in the browser player). */
+  /** Audio playback with HTTP Range support (seeking in the browser player). `?download=1` saves the file (audited). */
   app.get("/api/calls/:id/audio", anyone, async (req, reply) => {
     const call = await deps.db.call.findFirst({
       where: { AND: [{ id: idParam(req) }, callScope(currentUser(req))] },
@@ -149,6 +160,14 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     reply.header("accept-ranges", "bytes");
     reply.header("content-type", call.mimeType ?? "application/octet-stream");
     reply.header("cache-control", "private, no-store");
+    const { download } = z.object({ download: z.enum(["1", "true"]).optional() }).parse(req.query);
+    if (download) {
+      const ext = call.filePath.slice(call.filePath.lastIndexOf(".")).replace(/[^.\w]/g, "");
+      reply.header("content-disposition", `attachment; filename="call-${call.id}${ext}"`);
+      audit(req, "DOWNLOAD", call.id);
+      reply.header("content-length", size);
+      return reply.send(deps.storage.read(call.filePath));
+    }
 
     const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? "");
     if (m && (m[1] || m[2])) {
@@ -266,6 +285,78 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     await saveCostSettings(deps.db, { ...current, ...patch });
     req.log.info({ patch, by: currentUser(req).id }, "cost settings changed");
     return translationUsage(deps.db);
+  });
+
+  // ---- Privacy: retention, PII masking, client list, audit log ------------
+
+  app.get("/api/settings/privacy", admins, async () => getPrivacySettings(deps.db));
+
+  /** Retention (null = keep forever) and PII masking. Both default off. */
+  app.put("/api/settings/privacy", admins, async (req) => {
+    const patch = PrivacySettings.partial().parse(req.body);
+    const current = await getPrivacySettings(deps.db);
+    const next = { ...current, ...patch };
+    await savePrivacySettings(deps.db, next);
+    await audit(req, "SETTINGS_CHANGE", undefined, { privacy: patch });
+    return next;
+  });
+
+  app.get("/api/client-numbers", admins, async () => {
+    const rows = await deps.db.clientNumber.findMany({ orderBy: { createdAt: "desc" }, select: { id: true, raw: true, label: true, createdAt: true } });
+    return { items: rows, count: rows.length };
+  });
+
+  app.post("/api/client-numbers", admins, async (req, reply) => {
+    const body = ClientNumberBody.parse(req.body);
+    const key = numberKey(body.number);
+    if (key.length < MIN_KEY_DIGITS) throw new HttpError(400, `Enter a phone number with at least ${MIN_KEY_DIGITS} digits`);
+    const row = { key, raw: body.number, label: body.label || null };
+    const exists = await deps.db.clientNumber.findUnique({ where: { key: row.key } });
+    if (exists) throw new HttpError(409, `Already on the client list as ${exists.raw}`);
+    if ((await deps.db.clientNumber.count()) >= MAX_CLIENT_NUMBERS) throw new HttpError(409, "Client list is full");
+    const created = await deps.db.clientNumber.create({ data: row, select: { id: true, raw: true, label: true, createdAt: true } });
+    await audit(req, "CLIENT_LIST_CHANGE", undefined, { added: 1 });
+    return reply.code(201).send(created);
+  });
+
+  /** CSV import: one number per line, optional label after the first comma. Existing numbers are kept. */
+  app.post("/api/client-numbers/import", { ...admins, bodyLimit: 10 * 1024 * 1024 }, async (req) => {
+    const { csv } = z.object({ csv: z.string().max(10 * 1024 * 1024) }).parse(req.body);
+    const { rows, rejected } = parseClientCsv(csv);
+    if ((await deps.db.clientNumber.count()) + rows.length > MAX_CLIENT_NUMBERS) throw new HttpError(409, "Client list would be too large");
+    const r = await importClientNumbers(deps.db, rows);
+    await audit(req, "CLIENT_LIST_CHANGE", undefined, { imported: r.added, updated: r.updated, rejected: rejected.length });
+    return { ...r, rejected: rejected.length, rejectedSample: rejected.slice(0, 10) };
+  });
+
+  app.delete("/api/client-numbers/:id", admins, async (req, reply) => {
+    const id = idParam(req);
+    const r = await deps.db.clientNumber.deleteMany({ where: { id } });
+    if (r.count === 0) throw new HttpError(404, "Not found");
+    await audit(req, "CLIENT_LIST_CHANGE", undefined, { removed: 1 });
+    return reply.code(204).send();
+  });
+
+  /** Is this number on the client list? (admin check from the dashboard / app). */
+  app.get("/api/client-numbers/check", admins, async (req) => {
+    const { number } = z.object({ number: z.string().max(40) }).parse(req.query);
+    const key = numberKey(number);
+    return { onList: key.length > 0 && !!(await deps.db.clientNumber.findUnique({ where: { key } })) };
+  });
+
+  /** Newest first, keyset-paged. Admin only. */
+  app.get("/api/audit", admins, async (req) => {
+    const q = AuditQuery.parse(req.query);
+    const rows = await deps.db.auditLog.findMany({
+      where: { action: q.action, userId: q.userId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: q.limit + 1,
+      ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),
+      include: { user: { select: { id: true, name: true, email: true } } },
+    });
+    const more = rows.length > q.limit;
+    const items = more ? rows.slice(0, q.limit) : rows;
+    return { items, nextCursor: more ? items.at(-1)?.id : null };
   });
 
   app.put("/api/settings/device-config", admins, async (req) => {

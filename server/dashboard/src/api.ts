@@ -33,6 +33,8 @@ export interface CallPage {
 }
 export interface CallDetail extends Omit<CallItem, "transcript"> {
   filePath: string | null;
+  /** Set when the retention setting deleted the audio (transcript kept). */
+  audioDeletedAt?: string | null;
   mimeType: string | null;
   fileSize: string | null;
   transcript: {
@@ -169,6 +171,46 @@ export interface DeviceConfig {
   maxParallelUploads: number;
   compressAudio: boolean;
   businessOnly: boolean;
+}
+/** Admin privacy settings: retentionMonths null = keep audio forever (default). */
+export interface PrivacySettings {
+  retentionMonths: number | null;
+  maskPii: boolean;
+}
+export interface ClientNumber {
+  id: string;
+  raw: string;
+  label: string | null;
+  createdAt: string;
+}
+export interface ClientImportResult {
+  added: number;
+  updated: number;
+  rejected: number;
+  rejectedSample: string[];
+}
+export type AuditAction =
+  | "PLAY"
+  | "DOWNLOAD"
+  | "SEARCH"
+  | "DELETE"
+  | "USER_CHANGE"
+  | "DEVICE_REVOKE"
+  | "SETTINGS_CHANGE"
+  | "CLIENT_LIST_CHANGE"
+  | "RETENTION_DELETE";
+export interface AuditEntry {
+  id: string;
+  action: AuditAction | string;
+  callId: string | null;
+  detail: unknown;
+  ip: string | null;
+  createdAt: string;
+  user: UserRef | null;
+}
+export interface AuditPage {
+  items: AuditEntry[];
+  nextCursor: string | null;
 }
 export interface Settings {
   deviceConfig: DeviceConfig;

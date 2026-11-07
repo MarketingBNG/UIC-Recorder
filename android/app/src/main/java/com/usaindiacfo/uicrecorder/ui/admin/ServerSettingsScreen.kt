@@ -196,7 +196,11 @@ private fun ConfigEditor(
         Text("Low-RAM phones always upload one at a time.", style = MaterialTheme.typography.bodySmall)
 
         SwitchRow("Compress audio", "Smaller uploads, less data", form.compressAudio) { onChange(form.copy(compressAudio = it)) }
-        SwitchRow("Business calls only", "Upload only calls with numbers on the server's client list", form.businessOnly) {
+        SwitchRow(
+            "Business calls only",
+            "Skip calls with numbers saved in the phone's contacts, unless on the client list (Clients tab). Unsaved numbers still upload.",
+            form.businessOnly,
+        ) {
             onChange(form.copy(businessOnly = it))
         }
 
@@ -204,6 +208,9 @@ private fun ConfigEditor(
             Button(onClick = onSave, enabled = canSave) { Text("Save") }
             TextButton(onClick = onReset, enabled = dirty) { Text("Discard changes") }
         }
+
+        HorizontalDivider()
+        PrivacySection()
 
         HorizontalDivider()
         TranslateBackfillSection()
@@ -335,7 +342,7 @@ private fun <T> Segments(options: List<Pair<T, String>>, selected: T, onSelect: 
 }
 
 @Composable
-private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+internal fun SwitchRow(title: String, subtitle: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text(title, style = MaterialTheme.typography.bodyLarge)

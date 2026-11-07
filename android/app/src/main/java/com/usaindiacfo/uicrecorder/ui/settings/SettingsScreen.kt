@@ -74,7 +74,7 @@ fun SettingsScreen(onOpenSetup: () -> Unit) {
                 else "Older recordings: not synced",
             )
             if (config.compressAudio) Text("Audio is compressed before upload to save data.")
-            if (config.businessOnly) Text("Only calls with business contacts are synced.")
+            if (config.businessOnly) Text("Business calls only: calls with numbers saved in your contacts are not synced, unless the number is on the company's client list.")
             Text("Set by your admin.", style = MaterialTheme.typography.bodySmall)
         }
 

@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.usaindiacfo.uicrecorder.data.api.ApiClient
 import com.usaindiacfo.uicrecorder.data.api.DeviceConfig
+import com.usaindiacfo.uicrecorder.data.db.ClientHashDao
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -14,7 +15,7 @@ import kotlinx.coroutines.flow.map
 private val Context.configStore by preferencesDataStore("device_config")
 
 /** Server-pushed device config (GET /v1/device/config), cached so workers run offline. */
-class DeviceConfigRepository(private val context: Context, private val api: ApiClient) {
+class DeviceConfigRepository(private val context: Context, private val api: ApiClient, private val clients: ClientHashDao) {
     private val keyJson = stringPreferencesKey("json")
     private val keyFetchedAt = longPreferencesKey("fetched_at")
 
@@ -32,6 +33,8 @@ class DeviceConfigRepository(private val context: Context, private val api: ApiC
             it[keyJson] = api.json.encodeToString(cfg)
             it[keyFetchedAt] = System.currentTimeMillis()
         }
+        // Business-only mode: refresh the hashed client list with the config. On failure the old list stays.
+        if (cfg.businessOnly) runCatching { clients.replaceAll(api.clientNumberHashes().hashes) }
         return cfg
     }
 

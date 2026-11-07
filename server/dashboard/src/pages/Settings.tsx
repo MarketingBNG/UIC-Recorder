@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type DeviceConfig, type Settings } from "../api";
+import { ClientListPanel, PrivacyPanel } from "../components/Privacy";
 import { ErrorBox, PageHeader, Spinner, Toggle } from "../ui";
 
 export function SettingsPage() {
@@ -15,6 +16,8 @@ export function SettingsPage() {
       ) : (
         <>
           <DeviceConfigForm initial={settings.data.deviceConfig} />
+          <ClientListPanel />
+          <PrivacyPanel />
           <section className="card mt-4 p-4">
             <h2 className="font-semibold">Published app</h2>
             {settings.data.latestApp ? (
@@ -105,7 +108,7 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
         <Toggle label="Upload old recordings (backlog)" hint="Recordings made before the app was installed." checked={form.backlogEnabled} onChange={(v) => set("backlogEnabled", v)} />
         <Toggle label="Compress audio before upload" hint="Smaller files, less mobile data." checked={form.compressAudio} onChange={(v) => set("compressAudio", v)} />
-        <Toggle label="Business calls only" hint="Skip numbers saved as personal contacts." checked={form.businessOnly} onChange={(v) => set("businessOnly", v)} />
+        <Toggle label="Business calls only" hint="Phones skip calls with numbers saved in their contacts, unless the number is on the client list below. Unsaved numbers still upload. Phones ask for the Contacts permission." checked={form.businessOnly} onChange={(v) => set("businessOnly", v)} />
       </div>
 
       <div className="max-w-xs">

@@ -125,6 +125,9 @@ class ApiClient(
 
     suspend fun deviceConfig(): DeviceConfig = get("/v1/device/config")
     suspend fun heartbeat(req: HeartbeatRequest) = postUnit("/v1/device/heartbeat", req)
+
+    /** Business-only mode: hashed client-list numbers (never the numbers themselves). */
+    suspend fun clientNumberHashes(): ClientNumberHashes = get("/v1/device/client-numbers")
     suspend fun latestApp(): LatestApp = get("/v1/app/latest")
 
     /** Streams the published APK to [dest]. Verify LatestApp.sha256 before installing. */
@@ -200,6 +203,34 @@ class ApiClient(
     /** Queues compression of large transcribed recordings, oldest first; [limit] for a trial run (admin only). */
     suspend fun compressBackfill(limit: Int? = null): TranslateBackfill =
         post("/api/admin/compress-backfill", JsonObject(if (limit != null) mapOf("limit" to JsonPrimitive(limit)) else emptyMap()))
+
+    // ---- Privacy (admin) ----
+
+    suspend fun privacySettings(): PrivacySettings = get("/api/settings/privacy")
+
+    /** Sends both fields; retentionMonths null = keep forever. */
+    suspend fun putPrivacySettings(s: PrivacySettings): PrivacySettings {
+        val body = JsonObject(
+            mapOf(
+                "retentionMonths" to (s.retentionMonths?.let { JsonPrimitive(it) } ?: JsonNull),
+                "maskPii" to JsonPrimitive(s.maskPii),
+            ),
+        )
+        return json.decodeFromString(send(jsonRequest("/api/settings/privacy", "PUT", body.toString())))
+    }
+
+    suspend fun clientNumbers(): ClientNumberList = get("/api/client-numbers")
+    suspend fun addClientNumber(req: AddClientNumber): ClientNumberDto = post("/api/client-numbers", req)
+    suspend fun importClientNumbers(csv: String): ClientImportResult = post("/api/client-numbers/import", ClientCsv(csv))
+    suspend fun deleteClientNumber(id: String) {
+        send(Request.Builder().url(url("/api/client-numbers/$id")).delete().build())
+    }
+
+    suspend fun audit(action: String? = null, cursor: String? = null, limit: Int = 50): AuditPage =
+        get("/api/audit", mapOf("action" to action, "cursor" to cursor, "limit" to limit.toString()))
+
+    /** Download URL for a recording; the server records a DOWNLOAD in the audit log. */
+    fun downloadUrl(id: String): String = url("/api/calls/$id/audio", mapOf("download" to "1")).toString()
 
     /** Posts a test message to the Zoho Cliq alert channel (admin only). */
     suspend fun testAlert(): TestAlertResult = post("/api/admin/test-alert", JsonObject(emptyMap()))

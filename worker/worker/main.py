@@ -10,6 +10,7 @@ import structlog
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .config import Settings, load_dotenv
+from .pii import mask_segments, mask_text
 from .providers import Deferred, PermanentError, Provider, load_provider
 
 log = structlog.get_logger()
@@ -201,12 +202,16 @@ def process_job(api: Api, provider: Provider, job: dict, language: str | None) -
             log.exception("job failed", job_id=job_id)
             api.post_result(job_id, {"ok": False, "error": f"{type(e).__name__}: {e}", "retryable": True})
             return
-    payload = {"ok": True, "text": t.text, "provider": t.provider, "segments": t.segments}
+    text, segments = t.text, t.segments
+    if job.get("maskPii"):
+        # Admin privacy setting: Aadhaar / card numbers never reach the database.
+        text, segments = mask_text(text), mask_segments(segments)
+    payload = {"ok": True, "text": text, "provider": t.provider, "segments": segments}
     if t.language:
         payload["language"] = t.language
     api.post_result(job_id, payload)
     log.info("job done", job_id=job_id, call_id=job["callId"], seconds=round(time.monotonic() - started, 1),
-             chars=len(t.text))
+             chars=len(text))
 
 
 def run(settings: Settings) -> None:

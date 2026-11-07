@@ -40,6 +40,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     private val dao get() = c.db.recordings()
     private val api: ApiClient get() = c.apiClient
     private val prefs = SyncPrefs(context)
+    private val contacts: ContactCheck by lazy { AndroidContactCheck(context, c.db.clientHashes()) }
 
     data class ScanResult(val inserted: Int, val deferred: Boolean)
 
@@ -123,7 +124,12 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     }
 
     private suspend fun uploadOne(r: RecordingEntity, cfg: DeviceConfig): UploadOutcome {
-        PrivacyFilter.skipReason(r.phone, cfg)?.let { dao.setStatus(r.id, RecordingStatus.SKIPPED, it); return UploadOutcome.DONE }
+        // Decided at upload time so client-list and contact changes apply to recordings found earlier.
+        when (val d = PrivacyFilter.decide(r.phone, cfg, contacts)) {
+            is PrivacyDecision.Skip -> { dao.setStatus(r.id, RecordingStatus.SKIPPED, d.reason); return UploadOutcome.DONE }
+            is PrivacyDecision.Hold -> { dao.setStatus(r.id, RecordingStatus.PENDING, d.reason); return UploadOutcome.RETRY }
+            PrivacyDecision.Upload -> Unit
+        }
         val sha = r.sha256 ?: hash(r) ?: return UploadOutcome.DONE
         val uri = Uri.parse(r.uri)
         val mime = AudioMime.normalize(r.mimeType, r.displayName)
@@ -158,6 +164,8 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             when {
                 e.isAuth -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.SIGNED_OUT }
                 e.code == 413 || e.code == 415 -> { dao.setStatus(r.id, RecordingStatus.SKIPPED, e.message); UploadOutcome.DONE }
+                // Server upload rate limit: like network trouble, don't burn an attempt.
+                e.code == 429 -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.RETRY }
                 else -> { dao.markFailed(r.id, e.message); UploadOutcome.RETRY }
             }
         } catch (e: FileNotFoundException) {

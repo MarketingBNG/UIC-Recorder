@@ -8,6 +8,7 @@ import { TokenService } from "./auth/tokens.js";
 import { loadConfig } from "./config.js";
 import { createDb } from "./db.js";
 import { LocalStorage } from "./storage/local.js";
+import { startRetentionLoop } from "./privacy/retention.js";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 const config = loadConfig();
@@ -45,8 +46,17 @@ const stopAlerts = config.CLIQ_WEBHOOK_URL
     )
   : (app.log.warn("CLIQ_WEBHOOK_URL not set: alerts disabled"), () => {});
 
+// Daily audio retention; a no-op until an admin sets retentionMonths (default: keep forever).
+const stopRetention = startRetentionLoop(
+  db,
+  storage,
+  (err) => app.log.error({ err }, "retention run failed"),
+  (r) => app.log.info(r, "retention: deleted old audio files"),
+);
+
 const shutdown = async () => {
   stopAlerts();
+  stopRetention();
   await app.close();
   await db.$disconnect();
   process.exit(0);

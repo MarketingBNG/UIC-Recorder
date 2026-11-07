@@ -1,9 +1,12 @@
 package com.usaindiacfo.uicrecorder.ui.calls
 
+import android.app.DownloadManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -46,6 +49,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,7 +68,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.usaindiacfo.uicrecorder.AppContainer
 import com.usaindiacfo.uicrecorder.appContainer
+import kotlinx.coroutines.launch
 import com.usaindiacfo.uicrecorder.data.api.CallDetail
 import com.usaindiacfo.uicrecorder.data.api.CallStatus
 import com.usaindiacfo.uicrecorder.player.CallPlayer
@@ -91,7 +97,8 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
         onDispose { lifecycle.removeObserver(obs); player.release() }
     }
     LaunchedEffect(player, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { player.trackProgress() } }
-    val hasAudio = state.call?.status?.let { it != CallStatus.PENDING_UPLOAD } == true
+    val hasAudio = state.call?.let { it.status != CallStatus.PENDING_UPLOAD && it.audioDeletedAt == null } == true
+    val scope = rememberCoroutineScope()
     LaunchedEffect(player, hasAudio) { if (hasAudio) player.load(vm.audioUrl) }
     LaunchedEffect(state.deleted) { if (state.deleted) onBack() }
 
@@ -123,8 +130,15 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
                     item(key = "meta") { Meta(call) }
                     state.error?.let { err -> item(key = "err") { Text(err, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 8.dp)) } }
                     item(key = "player") {
-                        if (hasAudio) PlayerControls(ps, player, call.durationS)
-                        else Text("Audio not uploaded yet", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(vertical = 16.dp))
+                        if (hasAudio) {
+                            PlayerControls(ps, player, call.durationS)
+                            // Saved to Downloads; the server records it in the audit log.
+                            TextButton(onClick = { scope.launch { downloadRecording(context, container, call) } }) { Text("Download recording") }
+                        } else Text(
+                            noAudioText(call),
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(vertical = 16.dp),
+                        )
                     }
                     item(key = "th") {
                         Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -269,4 +283,36 @@ private val PauseIcon: ImageVector by lazy {
             moveTo(14f, 5f); horizontalLineTo(18f); verticalLineTo(19f); horizontalLineTo(14f); close()
         }
     }.build()
+}
+
+/** Why there is no player: not uploaded yet, or removed by the server's retention setting. */
+internal fun noAudioText(call: CallDetail): String =
+    if (call.audioDeletedAt != null) "Audio deleted by the retention setting. The transcript is kept."
+    else "Audio not uploaded yet"
+
+/** Queues the recording in the system DownloadManager (Downloads folder) with a fresh access token. */
+private suspend fun downloadRecording(context: Context, container: AppContainer, call: CallDetail) {
+    // Any authenticated call refreshes an access token that is about to expire.
+    runCatching { container.apiClient.me() }
+    val token = container.tokenStore.accessToken
+    if (token == null) {
+        Toast.makeText(context, "Sign in again to download.", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val ext = when (call.mimeType) {
+        "audio/mp4", "audio/aac" -> "m4a"
+        "audio/mpeg" -> "mp3"
+        "audio/amr" -> "amr"
+        "audio/wav" -> "wav"
+        "audio/ogg", "audio/opus" -> "ogg"
+        else -> "audio"
+    }
+    val req = DownloadManager.Request(Uri.parse(container.apiClient.downloadUrl(call.id)))
+        .addRequestHeader("Authorization", "Bearer $token")
+        .setTitle("Call recording")
+        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "call-${call.id}.$ext")
+    runCatching { context.getSystemService(DownloadManager::class.java).enqueue(req) }
+        .onSuccess { Toast.makeText(context, "Downloading to Downloads", Toast.LENGTH_SHORT).show() }
+        .onFailure { Toast.makeText(context, "Download failed: ${it.message}", Toast.LENGTH_LONG).show() }
 }

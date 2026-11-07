@@ -12,6 +12,7 @@ from typing import Callable
 import structlog
 
 from .config import Settings
+from .pii import mask_segments
 from .translate import TranslationError, translate_batch, translate_segments
 
 CLAIM_MAX = 20  # server limit per /internal/jobs/claim
@@ -30,7 +31,10 @@ def segments_of(transcript: dict) -> list[dict]:
     return [{"text": line} for line in (transcript.get("text") or "").splitlines() if line.strip()]
 
 
-def translation_payload(segments: list[dict], usage: dict, default_model: str, batch: bool) -> dict:
+def translation_payload(segments: list[dict], usage: dict, default_model: str, batch: bool, mask: bool = False) -> dict:
+    if mask:
+        # Claude may write a spoken number as digits, so the English side is masked too.
+        segments = mask_segments(segments)
     return {
         "model": usage.get("model") or default_model,
         "textEn": "\n".join(s["en"] for s in segments),
@@ -182,7 +186,8 @@ class Translator:
         try:
             segs = segments_of(self.api.get_transcript(job["callId"]))
             out, usage = translate_segments(self.client, segs, model=self.settings.translate_model)
-            self.api.post_translation(job_id, translation_payload(out, usage, self.settings.translate_model, False))
+            self.api.post_translation(job_id, translation_payload(out, usage, self.settings.translate_model, False,
+                                                                       bool(job.get("maskPii"))))
             log.info("translated", job_id=job_id, call_id=job["callId"], batch=False)
         except Exception as e:  # noqa: BLE001 - reported and retried by the API
             log.exception("translate failed", job_id=job_id)
@@ -201,6 +206,7 @@ class Translator:
 
     def translate_backlog(self, jobs: list[dict]) -> None:
         calls: dict[str, list[dict]] = {}
+        mask = {job["jobId"]: bool(job.get("maskPii")) for job in jobs}
         for job in jobs:
             try:
                 calls[job["jobId"]] = segments_of(self.api.get_transcript(job["callId"]))
@@ -223,7 +229,8 @@ class Translator:
                 continue
             out, usage = r
             try:
-                self.api.post_translation(job_id, translation_payload(out, usage, self.settings.translate_model, True))
+                self.api.post_translation(job_id, translation_payload(out, usage, self.settings.translate_model, True,
+                                                                       mask[job_id]))
             except Exception:
                 log.exception("could not post translation", job_id=job_id)
         log.info("translate batch done", jobs=len(calls))

@@ -29,7 +29,7 @@ class AppContainer(private val context: Context) {
     val db by lazy { AppDatabase.build(context) }
     val googleSignIn by lazy { GoogleSignIn(BuildConfig.GOOGLE_WEB_CLIENT_ID) }
     val authRepository by lazy { AuthRepository(context, apiClient, tokenStore, db, googleSignIn) }
-    val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient) }
+    val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient, db.clientHashes()) }
 
     /** Low-RAM phones (or < 3 GB): hash/compress/upload one file at a time. */
     val isLowRamDevice: Boolean by lazy {

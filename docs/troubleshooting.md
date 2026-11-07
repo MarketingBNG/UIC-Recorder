@@ -2,6 +2,18 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## New Android file under `data/db/` was not picked up by git (M3)
+- **Cause:** the root `.gitignore` rule `data/` (meant for server recordings) also matches the app's `data` package.
+- **Fix:** added `ClientHash.kt` with `git add -f`; check `git status` for new files under `.../uicrecorder/data/`.
+
+## Test database would not start while the dev database was running (M3, local dev)
+- **Cause:** `npm test` reuses `.pgtest` on port 54339; a leftover test Postgres child process still held it ("pre-existing shared memory block is still in use").
+- **Fix:** ran the tests on a separate copy with `TEST_DB_DIR=.pgtest-m3 TEST_DB_PORT=54349 npx vitest run`, leaving the dev database (`.pgdata`, port 54329) alone.
+
+## `npx vitest run test/privacy.test.ts` found no tests (M3, local dev, Windows)
+- **Cause:** the path filter `test/privacy.test.ts` did not match the Windows file path vitest compares it with.
+- **Fix:** filter by name only: `npx vitest run privacy`.
+
 ## Two compress jobs for one call could delete the saved recording (M2b review)
 - **Cause:** both jobs wrote `<callId>-c.m4a`; the losing job's cleanup removed the file the winner had just swapped in.
 - **Fix:** the file is now `<callId>-c-<jobId>.m4a`, a partial unique index allows one open compress job per call, and a resent upload after a lost response returns the earlier result instead of an error.
