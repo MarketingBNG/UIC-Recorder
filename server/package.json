@@ -23,7 +23,7 @@
     "@fastify/cookie": "11.1.5",
     "@fastify/helmet": "13.2.0",
     "@fastify/rate-limit": "11.2.2",
-    "@fastify/static": "10.1.8",
+    "@fastify/static": "10.1.10",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
     "@types/node": "24.19.2",
