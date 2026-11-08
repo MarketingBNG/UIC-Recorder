@@ -114,3 +114,6 @@ All off by default; nothing to set to keep today's behaviour. See `docs/privacy.
 2. Settings page → **Client list** (admin): add numbers or import a CSV (one number per line, optional label after a comma). Used only when **Business calls only** is on.
 3. Settings page → **Privacy** (admin): **Keep recordings forever** (default on). Turning it off and setting N months makes the API delete audio files of calls older than N months once a day; transcripts stay. **Mask Aadhaar and card numbers** (default off) applies to new transcripts only.
 4. The **Audit log** page (admin) lists plays, downloads, searches, deletions and settings changes.
+
+## Android rollout (Milestone 4)
+No new env vars. Migration `20261112090000_device_health` adds heartbeat columns to `devices` (runs on deploy). Google sign-in setup: `docs/google-oauth-setup.md`. Signing, publishing the APK (`apk/` in storage + `settings.latest_app`) and per-brand phone setup: `docs/rollout.md`.

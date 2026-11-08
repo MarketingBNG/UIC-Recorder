@@ -66,6 +66,8 @@ fun SetupScreen(onDone: () -> Unit) {
     }
     val batteryOk = remember(tick) { SetupChecks.ignoringBatteryOptimizations(context) }
     val restricted = remember(tick) { SetupChecks.backgroundRestricted(context) }
+    val needsRestrictedSettings = remember(tick) { SetupChecks.needsRestrictedSettings(context) }
+    val dialer = remember(tick) { com.usaindiacfo.uicrecorder.sync.DeviceHealth.defaultDialer(context) }
     var folderFound by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(tick, requiredOk, config.recorderFolders) {
         folderFound = if (requiredOk) SetupChecks.recorderFolderFound(context, config.recorderFolders) else null
@@ -109,6 +111,17 @@ fun SetupScreen(onDone: () -> Unit) {
             if (!requiredOk) TextButton(onClick = { SetupChecks.openAppDetails(context) }) { Text("App settings") }
         }
 
+        if (needsRestrictedSettings) {
+            Step(
+                done = false,
+                title = "Allow restricted settings",
+                body = "Android blocks call log access for apps installed outside the Play Store. If \"Allow\" above shows \"Restricted setting\": " +
+                    "tap Open App info, tap ⋮ (top right), choose \"Allow restricted settings\" and confirm, then come back and tap Allow again.",
+            ) {
+                Button(onClick = { SetupChecks.openAppDetails(context) }) { Text("Open App info") }
+            }
+        }
+
         Step(
             done = contactsOk && notifOk,
             // Business-only mode needs Contacts to tell personal calls apart; those recordings wait until it is allowed.
@@ -144,6 +157,15 @@ fun SetupScreen(onDone: () -> Unit) {
             ) {
                 OutlinedButton(onClick = { SetupChecks.openAutostartSettings(context) }) { Text("Open autostart") }
             }
+        }
+
+        if (com.usaindiacfo.uicrecorder.sync.DeviceHealth.isGoogleDialer(dialer)) {
+            Step(
+                done = false,
+                title = "Google Phone can't be used",
+                body = "Your default Phone app is Google Phone. Its call recordings are stored privately and UIC Recorder can't read them. " +
+                    "Switch the default Phone app to your phone maker's dialer (Settings > Apps > Default apps > Phone app) and turn on its auto-record.",
+            )
         }
 
         Step(

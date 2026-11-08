@@ -12,6 +12,11 @@ import java.io.IOException
 private val Context.signedIn get() = container.tokenStore.user.value != null
 private const val DAY_MS = 24 * 3600_000L
 
+/** Remembers why the system stopped a sync job (Android 12+ gives a reason); sent with the heartbeat. */
+private fun androidx.work.ListenableWorker.recordStop(ctx: Context) {
+    if (android.os.Build.VERSION.SDK_INT >= 31) SyncPrefs(ctx).lastStopReason = stopReason
+}
+
 /** Fired by the MediaStore content-URI trigger (or "Sync now"): stores new recordings and queues the upload. */
 class NewRecordingWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
@@ -37,6 +42,7 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         if (!ctx.signedIn) return Result.success()
         val c = ctx.container
         val outcome = SyncEngine(ctx, c).upload(RecordingSource.LIVE, c.deviceConfigRepository.current()) { isStopped }
+        if (isStopped) recordStop(ctx)
         HeartbeatReporter.report(ctx)
         // KEEP drops enqueues while this runs, so pick up anything that arrived meanwhile.
         val more = outcome == UploadOutcome.DONE && c.db.recordings().nextPending(RecordingSource.LIVE, 1).isNotEmpty()
@@ -57,6 +63,7 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             engine.scan(cfg, System.currentTimeMillis() - cfg.backlogCutoffDays.coerceAtLeast(1) * DAY_MS)
             engine.dedup(RecordingSource.BACKLOG) { isStopped }
             val outcome = engine.upload(RecordingSource.BACKLOG, cfg) { isStopped }
+            if (isStopped) recordStop(ctx)
             HeartbeatReporter.report(ctx)
             when {
                 outcome == UploadOutcome.SIGNED_OUT -> Result.success()

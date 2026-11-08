@@ -22,15 +22,37 @@ android {
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${providers.gradleProperty("uic.googleWebClientId").getOrElse("")}\"")
     }
 
+    // Release key lives outside the repo; path + password come from ~/.gradle/gradle.properties.
+    val keystorePath = providers.gradleProperty("uic.keystore").orNull
+    val keystorePassword = providers.gradleProperty("uic.keystorePassword").orNull
+    signingConfigs {
+        if (keystorePath != null && keystorePassword != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                keyAlias = "uic"
+                keyPassword = keystorePassword
+            }
+        }
+    }
     buildTypes {
         debug {
             buildConfigField("String", "API_URL", "\"${apiUrl.getOrElse("http://localhost:8000")}\"")
         }
         release {
             buildConfigField("String", "API_URL", "\"${releaseApiUrl.getOrElse("")}\"")
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        // Release-like build for :baselineprofile (Macrobenchmark). Debug-signed, never distributed.
+        create("benchmark") {
+            initWith(getByName("release"))
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += "release"
+            isDebuggable = false
+            proguardFiles("benchmark-rules.pro")
         }
     }
     compileOptions {
@@ -87,6 +109,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.serialization.json)
     implementation(libs.profileinstaller)
+    implementation(libs.tink.android)
+    // Only to migrate tokens from the old EncryptedSharedPreferences file (TokenStore.migrateLegacy).
     implementation(libs.security.crypto)
     debugImplementation(libs.compose.ui.tooling)
     testImplementation(libs.junit)

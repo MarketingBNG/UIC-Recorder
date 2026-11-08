@@ -8,6 +8,17 @@ import { TranslationPanel } from "../components/Translation";
 import { Badge, ConfirmDialog, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
 
 const STALE_MS = 24 * 3600_000;
+const GOOGLE_DIALER = "com.google.android.dialer";
+
+/** WorkInfo.STOP_REASON_* names (Android 12+); same table as the app. */
+const STOP_REASONS: Record<number, string> = {
+  [-256]: "Not stopped", 0: "Unknown", 1: "Cancelled", 2: "Preempted", 3: "Timeout", 4: "Device state", 5: "Battery low",
+  6: "Charging", 7: "Connectivity", 8: "Idle", 9: "Storage low", 10: "Quota", 11: "Background restriction",
+  12: "App standby", 13: "User", 14: "System processing", 15: "Estimated app launch time changed",
+};
+export function stopReasonLabel(r: number): string {
+  return STOP_REASONS[r] ?? `Code ${r}`;
+}
 
 export function HealthPage() {
   const me = useMe();
@@ -84,6 +95,8 @@ export function HealthPage() {
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
                     {d.revokedAt ? <Badge tone="red">Revoked</Badge> : stale ? <Badge tone="amber">Not seen 24h+</Badge> : <Badge tone="green">OK</Badge>}
                     {!d.revokedAt && !d.permissionsOk && <Badge tone="red">Permissions missing</Badge>}
+                    {!d.revokedAt && d.throttled && <Badge tone="amber">Throttled ({d.standbyBucketName})</Badge>}
+                    {!d.revokedAt && d.callsWithoutRecordings && <Badge tone="red">Calls but no recordings</Badge>}
                   </div>
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -95,6 +108,40 @@ export function HealthPage() {
                   <dd className={d.pendingCount > 0 ? "font-medium text-amber-700 dark:text-amber-300" : ""}>{d.pendingCount}</dd>
                   <dt className="text-slate-500">Free space</dt>
                   <dd>{formatBytes(d.freeBytes)}</dd>
+                  {d.calls7d != null && (
+                    <>
+                      <dt className="text-slate-500">Calls / recordings (7 d)</dt>
+                      <dd className={d.callsWithoutRecordings ? "font-medium text-red-700 dark:text-red-300" : ""}>
+                        {d.calls7d} / {d.recordings7d ?? "–"}
+                      </dd>
+                    </>
+                  )}
+                  {d.standbyBucketName && (
+                    <>
+                      <dt className="text-slate-500">Standby bucket</dt>
+                      <dd className={d.throttled ? "font-medium text-amber-700 dark:text-amber-300" : ""}>{d.standbyBucketName}</dd>
+                    </>
+                  )}
+                  {d.lastStopReason != null && (
+                    <>
+                      <dt className="text-slate-500">Last job stop</dt>
+                      <dd>{stopReasonLabel(d.lastStopReason)}</dd>
+                    </>
+                  )}
+                  {d.defaultDialer && (
+                    <>
+                      <dt className="text-slate-500">Dialer</dt>
+                      <dd className="truncate" title={d.defaultDialer}>
+                        {d.defaultDialer === GOOGLE_DIALER ? "Google Phone (recordings not readable)" : d.defaultDialer}
+                      </dd>
+                    </>
+                  )}
+                  {d.autostartIntent && (
+                    <>
+                      <dt className="text-slate-500">Autostart screen</dt>
+                      <dd className="truncate" title={d.autostartIntent}>{d.autostartIntent.split("/")[0]}</dd>
+                    </>
+                  )}
                   {d.revokedAt && (
                     <>
                       <dt className="text-slate-500">Revoked</dt>

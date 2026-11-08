@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Android unit test crashed with ExceptionInInitializerError (M4)
+- **Cause:** the test called a helper on `SetupChecks`, whose init reads `Build.MANUFACTURER` (null in JVM unit tests).
+- **Fix:** moved the pure rule (`needsRestrictedSettings`) to `DeviceHealth`, which has no Android state at init.
+
+## Dashboard build failed: "stream did not contain valid UTF-8" in Health.tsx (M4)
+- **Cause:** a Python edit script on Windows wrote the file in cp1252, so an inserted en dash became an invalid byte.
+- **Fix:** rewrote the byte as UTF-8; edit scripts now open files with `encoding="utf-8"`.
+
 ## Two retention claims at once failed with a unique-key error (M3 review fixes)
 - **Cause:** Prisma `upsert` is not atomic; two concurrent calls both tried to insert the `retention:last_run` row.
 - **Fix:** create the row with `createMany({ skipDuplicates: true })`, then claim with a conditional `updateMany`.

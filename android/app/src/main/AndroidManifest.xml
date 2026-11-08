@@ -23,6 +23,10 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Uic"
         tools:targetApi="29">
+        <!-- Lets Macrobenchmark / baseline profile generation measure release-like builds (API 29+). -->
+        <profileable
+            android:shell="true"
+            tools:targetApi="29" />
         <activity
             android:name=".MainActivity"
             android:exported="true">

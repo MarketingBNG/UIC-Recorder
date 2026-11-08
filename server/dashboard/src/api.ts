@@ -85,6 +85,16 @@ export interface Device {
   revokedAt: string | null;
   createdAt: string;
   user: UserRef;
+  /** M4 heartbeat fields; absent/null on older servers or apps. */
+  standbyBucket?: number | null;
+  standbyBucketName?: string | null;
+  lastStopReason?: number | null;
+  calls7d?: number | null;
+  recordings7d?: number | null;
+  autostartIntent?: string | null;
+  defaultDialer?: string | null;
+  throttled?: boolean;
+  callsWithoutRecordings?: boolean;
 }
 export interface Stats {
   calls: Partial<Record<CallStatus, number>>;

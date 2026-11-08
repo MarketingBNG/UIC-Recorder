@@ -4,6 +4,7 @@ import { callScope, requireSession } from "../auth/guards.js";
 import { HttpError, currentUser, type Deps } from "../context.js";
 import { Prisma, type AuditAction, type User } from "../generated/prisma/client.js";
 import { DeviceConfig, getSettings } from "../settings.js";
+import { bucketName, callsWithoutRecordings, isThrottled } from "../devices/health.js";
 import { firefliesUsage } from "../fireflies/budget.js";
 import { compressionStats, queueCompressionBackfill, queueTranslationBackfill } from "../jobs/queue.js";
 import { cliqSender } from "../alerts/cliq.js";
@@ -235,7 +236,14 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       orderBy: { lastSeenAt: { sort: "desc", nulls: "last" } },
       include: { user: { select: { id: true, name: true, email: true } } },
     });
-    return devices.map((d) => ({ ...d, freeBytes: d.freeBytes?.toString() ?? null }));
+    return devices.map((d) => ({
+      ...d,
+      freeBytes: d.freeBytes?.toString() ?? null,
+      // Derived flags (additive) so the dashboard and the app show the same warnings.
+      standbyBucketName: bucketName(d.standbyBucket),
+      throttled: isThrottled(d),
+      callsWithoutRecordings: callsWithoutRecordings(d),
+    }));
   });
 
   app.post("/api/devices/:id/revoke", admins, async (req, reply) => {

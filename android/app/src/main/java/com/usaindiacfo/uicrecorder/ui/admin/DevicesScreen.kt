@@ -231,6 +231,24 @@ private fun DeviceRow(d: DeviceDto, now: Instant, onRevoke: (() -> Unit)?) {
             if (!d.permissionsOk && !revoked) {
                 Text("Permissions missing: recordings can't be read", color = error, style = MaterialTheme.typography.bodySmall)
             }
+            deviceHealthLines(d).forEach { (text, warn) ->
+                Text(text, color = if (warn && !revoked) error else Color.Unspecified, style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
+}
+
+/** Extra heartbeat lines (M4), same facts as the dashboard Health page. Pair = text to "is a warning". */
+internal fun deviceHealthLines(d: DeviceDto): List<Pair<String, Boolean>> = buildList {
+    if (d.calls7d != null) {
+        val tail = if (d.callsWithoutRecordings) " (calls but no recordings)" else ""
+        add(Pair("Calls / recordings (7 d): ${d.calls7d} / ${d.recordings7d ?: "-"}$tail", d.callsWithoutRecordings))
+    }
+    d.standbyBucketName?.let { add(Pair("Standby bucket: $it" + (if (d.throttled) " (throttled)" else ""), d.throttled)) }
+    d.lastStopReason?.let { add("Last job stop: ${com.usaindiacfo.uicrecorder.sync.DeviceHealth.stopReasonLabel(it)}" to false) }
+    d.defaultDialer?.let {
+        val google = com.usaindiacfo.uicrecorder.sync.DeviceHealth.isGoogleDialer(it)
+        add(Pair("Dialer: " + (if (google) "Google Phone (recordings not readable)" else it), google))
+    }
+    d.autostartIntent?.let { add("Autostart screen: ${it.substringBefore('/')}" to false) }
 }

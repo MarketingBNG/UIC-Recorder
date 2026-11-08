@@ -42,7 +42,7 @@ afterAll(async () => {
 beforeEach(async () => {
   await t.db.job.updateMany({ where: { status: { in: ["QUEUED", "RUNNING", "WAITING_BUDGET"] } }, data: { status: "DONE" } });
   await t.db.job.updateMany({ data: { finishedAt: null, failedAttemptAt: null, costUsd: null, costAt: null } });
-  await t.db.device.updateMany({ data: { lastSeenAt: new Date() } });
+  await t.db.device.updateMany({ data: { lastSeenAt: new Date(), calls7d: null } });
   await t.db.firefliesReservation.deleteMany();
   await t.db.setting.updateMany({ data: { fireflies: {}, costs: {} } });
   await t.db.workerSeen.deleteMany();

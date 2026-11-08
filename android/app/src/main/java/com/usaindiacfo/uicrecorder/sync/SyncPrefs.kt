@@ -27,7 +27,13 @@ class SyncPrefs(context: Context) {
         get() = prefs.getLong(KEY_LAST, 0)
         set(v) = prefs.edit().putLong(KEY_LAST, v).apply()
 
+    /** WorkManager stop reason the last time a sync job was stopped by the system; null if never. */
+    var lastStopReason: Int?
+        get() = if (prefs.contains(KEY_STOP)) prefs.getInt(KEY_STOP, 0) else null
+        set(v) = prefs.edit().apply { if (v == null) remove(KEY_STOP) else putInt(KEY_STOP, v) }.apply()
+
     companion object {
+        private const val KEY_STOP = "last_stop_reason"
         private const val KEY_TREE = "saf_tree"
         private const val KEY_LAST = "last_sync_at"
         private const val KEY_DISCOVERED = "discovered_folders"

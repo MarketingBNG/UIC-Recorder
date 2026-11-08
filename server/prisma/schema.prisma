@@ -96,6 +96,14 @@ model Device {
   pendingCount   Int       @default(0) @map("pending_count")
   permissionsOk  Boolean   @default(false) @map("permissions_ok")
   freeBytes      BigInt?   @map("free_bytes")
+  /// UsageStatsManager bucket: 5 ACTIVE, 10 WORKING_SET, 20 FREQUENT, 30 RARE, 40 RESTRICTED, 45 RESTRICTED (API 31+ some OEMs), 50 NEVER.
+  standbyBucket  Int?      @map("standby_bucket")
+  lastStopReason Int?      @map("last_stop_reason")
+  /// Calls over 30 s in the phone call log over the last 7 days, and recordings found for the same window.
+  calls7d        Int?      @map("calls_7d")
+  recordings7d   Int?      @map("recordings_7d")
+  autostartIntent String?  @map("autostart_intent")
+  defaultDialer  String?   @map("default_dialer")
   revokedAt      DateTime? @map("revoked_at")
   createdAt      DateTime  @default(now()) @map("created_at")
 

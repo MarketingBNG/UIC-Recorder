@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "UIC Recorder"
 include(":app")
+include(":baselineprofile")

@@ -3,6 +3,7 @@ import { firefliesUsage } from "../fireflies/budget.js";
 import type { LocalStorage } from "../storage/local.js";
 import { type AlertSender, resolveAlert, sendAlert } from "./cliq.js";
 import { jobStats } from "./metrics.js";
+import { CALLS_NO_REC_MIN } from "../devices/health.js";
 import { translationUsage } from "../translation/cost.js";
 
 const MIN = 60_000;
@@ -142,6 +143,23 @@ async function phoneCheck(db: Db, now: Date): Promise<CheckResult> {
   };
 }
 
+/** Phones with many calls but no recordings found: auto-record is probably off. */
+async function noRecordingsCheck(db: Db): Promise<CheckResult> {
+  const rows = await db.device.findMany({
+    where: { revokedAt: null, user: { active: true }, calls7d: { gt: CALLS_NO_REC_MIN }, recordings7d: 0 },
+    select: { model: true, calls7d: true, user: { select: { name: true, email: true } } },
+  });
+  const names = rows.slice(0, 10).map((d) => `${d.user.name ?? d.user.email} (${d.model ?? "phone"}, ${d.calls7d} calls)`);
+  const more = rows.length > names.length ? ` and ${rows.length - names.length} more` : "";
+  return {
+    key: "calls-no-recordings",
+    firing: rows.length > 0,
+    text: rows.length > 0
+      ? `${rows.length} phone(s) made calls this week but no recordings were found (check auto-record): ${names.join(", ")}${more}.`
+      : "Every phone with calls is finding recordings again.",
+  };
+}
+
 const CLAUDE_THRESHOLDS = [80, 100] as const;
 
 /** Claude translation spend vs. its monthly cap (80% warning, 100% = translations paused). */
@@ -170,6 +188,7 @@ export async function evaluateChecks(db: Db, storage: LocalStorage, now = new Da
     queueChecks(db, now).catch(() => []),
     diskCheck(storage),
     phoneCheck(db, now).catch(() => null),
+    noRecordingsCheck(db).catch(() => null),
     claudeSpendChecks(db, now).catch(() => []),
   ]);
   return parts.flat().filter((c): c is CheckResult => c !== null);

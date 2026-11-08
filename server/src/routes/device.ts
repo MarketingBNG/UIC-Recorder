@@ -14,6 +14,13 @@ const Heartbeat = z.object({
   permissionsOk: z.boolean(),
   freeBytes: z.number().int().min(0).optional(),
   lastSyncAt: z.iso.datetime().optional(),
+  // M4 (all optional so older apps keep working).
+  standbyBucket: z.number().int().min(0).max(1000).optional(),
+  lastStopReason: z.number().int().min(-512).max(1000).optional(),
+  calls7d: z.number().int().min(0).max(100_000).optional(),
+  recordings7d: z.number().int().min(0).max(100_000).optional(),
+  autostartIntent: z.string().max(200).optional(),
+  defaultDialer: z.string().max(200).optional(),
 });
 
 export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
@@ -48,6 +55,12 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
         permissionsOk: body.permissionsOk,
         freeBytes: body.freeBytes !== undefined ? BigInt(body.freeBytes) : undefined,
         lastSyncAt: body.lastSyncAt ? new Date(body.lastSyncAt) : undefined,
+        standbyBucket: body.standbyBucket,
+        lastStopReason: body.lastStopReason,
+        calls7d: body.calls7d,
+        recordings7d: body.recordings7d,
+        autostartIntent: body.autostartIntent,
+        defaultDialer: body.defaultDialer,
         lastSeenAt: new Date(),
       },
     });

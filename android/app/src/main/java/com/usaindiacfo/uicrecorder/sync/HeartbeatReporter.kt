@@ -7,6 +7,7 @@ import com.usaindiacfo.uicrecorder.container
 import com.usaindiacfo.uicrecorder.data.api.HeartbeatRequest
 import com.usaindiacfo.uicrecorder.detect.CallLogMatcher
 import com.usaindiacfo.uicrecorder.detect.RecorderScanner
+import com.usaindiacfo.uicrecorder.ui.setup.SetupChecks
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
 
@@ -26,7 +27,9 @@ object HeartbeatReporter {
         val c = context.container
         if (c.tokenStore.user.value == null) return
         runCatching {
-            val last = SyncPrefs(context).lastSyncAt
+            val prefs = SyncPrefs(context)
+            val last = prefs.lastSyncAt
+            val calls = DeviceHealth.longCalls(context, now)
             c.apiClient.heartbeat(
                 HeartbeatRequest(
                     appVersion = BuildConfig.VERSION_NAME,
@@ -34,6 +37,12 @@ object HeartbeatReporter {
                     permissionsOk = permissionsOk(context),
                     freeBytes = runCatching { StatFs(context.filesDir.path).availableBytes }.getOrNull(),
                     lastSyncAt = if (last > 0) Instant.ofEpochMilli(last).toString() else null,
+                    standbyBucket = DeviceHealth.standbyBucket(context),
+                    lastStopReason = prefs.lastStopReason,
+                    calls7d = calls,
+                    recordings7d = if (calls != null) c.db.recordings().foundSince(now - DeviceHealth.WINDOW_MS) else null,
+                    autostartIntent = SetupChecks.resolvedAutostart(context),
+                    defaultDialer = DeviceHealth.defaultDialer(context),
                 ),
             )
         }.onFailure { lastSent.set(prev) }

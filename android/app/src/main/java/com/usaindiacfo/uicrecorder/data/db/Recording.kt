@@ -114,6 +114,10 @@ interface RecordingDao {
     @Query("SELECT COUNT(*) FROM recordings WHERE status IN ('PENDING','UPLOADING','FAILED')")
     suspend fun pendingCount(): Int
 
+    /** Recordings found (any status) whose file is newer than [sinceMs]; for the heartbeat's "calls but no recordings" check. */
+    @Query("SELECT COUNT(*) FROM recordings WHERE dateModified >= :sinceMs")
+    suspend fun foundSince(sinceMs: Long): Int
+
     @Query("SELECT MAX(updatedAt) FROM recordings WHERE status = 'UPLOADED'")
     fun observeLastUploadAt(): Flow<Long?>
 

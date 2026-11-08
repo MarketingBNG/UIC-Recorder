@@ -142,6 +142,29 @@ object SetupChecks {
         if (autostartIntents().none { tryStart(context, it) }) openAppDetails(context)
     }
 
+    /** "package/class" of the first OEM autostart screen that resolves here (heartbeat field), or null. */
+    fun resolvedAutostart(context: Context): String? = autostartIntents().firstOrNull { i ->
+        runCatching { context.packageManager.resolveActivity(i, 0) != null }.getOrDefault(false)
+    }?.component?.flattenToShortString()
+
+    /**
+     * Android 13+ blocks "restricted settings" (call log among them) for apps installed outside an app store,
+     * until the user taps App info > ⋮ > "Allow restricted settings".
+     */
+    fun sideloaded(context: Context): Boolean = runCatching {
+        val pm = context.packageManager
+        val installer = if (Build.VERSION.SDK_INT >= 30) pm.getInstallSourceInfo(context.packageName).installingPackageName
+        else @Suppress("DEPRECATION") pm.getInstallerPackageName(context.packageName)
+        installer == null || installer !in STORE_INSTALLERS
+    }.getOrDefault(true)
+
+    private val STORE_INSTALLERS = setOf("com.android.vending", "com.sec.android.app.samsungapps", "com.xiaomi.market", "com.heytap.market", "com.oppo.market", "com.bbk.appstore")
+
+    fun needsRestrictedSettings(context: Context): Boolean =
+        com.usaindiacfo.uicrecorder.sync.DeviceHealth.needsRestrictedSettings(
+            Build.VERSION.SDK_INT, granted(context, Manifest.permission.READ_CALL_LOG), sideloaded(context),
+        )
+
     private fun autostartIntents(): List<Intent> {
         fun cmp(pkg: String, cls: String) = Intent().setComponent(ComponentName(pkg, cls))
         return when {

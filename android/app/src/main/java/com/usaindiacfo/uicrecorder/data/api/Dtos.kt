@@ -72,6 +72,16 @@ data class HeartbeatRequest(
     val permissionsOk: Boolean,
     val freeBytes: Long? = null,
     val lastSyncAt: String? = null,
+    /** UsageStatsManager bucket (API 28+). */
+    val standbyBucket: Int? = null,
+    /** WorkManager stop reason of the last stopped sync job (API 31+). */
+    val lastStopReason: Int? = null,
+    /** Call-log calls of 30 s+ in the last 7 days; null without call-log permission. */
+    val calls7d: Int? = null,
+    val recordings7d: Int? = null,
+    /** OEM autostart screen that resolves on this phone (package/class). */
+    val autostartIntent: String? = null,
+    val defaultDialer: String? = null,
 )
 
 @Serializable
@@ -206,6 +216,15 @@ data class DeviceDto(
     val revokedAt: String? = null,
     val createdAt: String,
     val user: UserRef,
+    val standbyBucket: Int? = null,
+    val standbyBucketName: String? = null,
+    val lastStopReason: Int? = null,
+    val calls7d: Int? = null,
+    val recordings7d: Int? = null,
+    val autostartIntent: String? = null,
+    val defaultDialer: String? = null,
+    val throttled: Boolean = false,
+    val callsWithoutRecordings: Boolean = false,
 )
 
 @Serializable
