@@ -162,19 +162,28 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       },
     } satisfies Prisma.CallSelect;
     const lines = [`${BOM}${CSV_HEADER}`];
-    let cursor: string | undefined;
+    // Keyset paging on (startedAt, id) values, not a Prisma cursor row: if the last row of a page is deleted
+    // (retention purge, manager delete) mid-export, a row cursor returns an empty page and truncates the CSV.
+    let last: { startedAt: Date; id: string } | undefined;
     while (lines.length - 1 < EXPORT_MAX_ROWS) {
       const take = Math.min(500, EXPORT_MAX_ROWS - (lines.length - 1));
       const page = await deps.db.call.findMany({
-        where,
+        where: last
+          ? {
+              AND: [
+                where,
+                { OR: [{ startedAt: { lt: last.startedAt } }, { startedAt: last.startedAt, id: { lt: last.id } }] },
+              ],
+            }
+          : where,
         orderBy: [{ startedAt: "desc" }, { id: "desc" }],
         take,
-        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
         select,
       });
       lines.push(...csvLines(page));
       if (page.length < take) break;
-      cursor = page.at(-1)!.id;
+      const end = page.at(-1)!;
+      last = { startedAt: end.startedAt, id: end.id };
     }
     await audit(req, "EXPORT", undefined, { rows: lines.length - 1, filters: { ...q, q: q.q ? "(search)" : undefined } });
     const stamp = new Date().toISOString().slice(0, 10);
