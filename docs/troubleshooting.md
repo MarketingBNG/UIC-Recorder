@@ -2,6 +2,15 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Edit script left a raw BOM / real line breaks in TypeScript strings (M5 review fixes, local dev)
+- **Cause:** the CSV code had a literal U+FEFF character, so a text match on the escaped form failed; a heredoc turned `
+` escapes into real line breaks.
+- **Fix:** the BOM is now a named `"﻿"` constant in `src/calls/export.ts`; the broken line was rewritten with the escapes built explicitly.
+
+## Local gitleaks run blocked (M5 review fixes, local dev)
+- **Cause:** downloading and running the gitleaks release binary was not permitted in the local session.
+- **Fix:** none locally; the CI `secrets` job is the first real scan. Check its result on the first PR.
+
 ## Inline Python edit script failed in the Bash tool: "unexpected EOF while looking for matching quote" (M5, local dev)
 - **Cause:** a heredoc'd Python script containing TypeScript template literals (backticks) inside triple-quoted strings confused the shell wrapper.
 - **Fix:** wrote the edit script to a file in the scratchpad and ran `python <file>` instead.

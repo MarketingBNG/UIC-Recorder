@@ -93,6 +93,7 @@ Claude reads the English text and writes a summary, action items, the customer's
 2. On `uic-worker`, `ANTHROPIC_API_KEY` must be set (same key as translation). Optional: `SUMMARY_MODEL` (default `claude-sonnet-5-5`), `SUMMARIZE_ENABLED=false` to keep this worker off summaries. Batching uses `TRANSLATE_BATCH_MAX` / `TRANSLATE_BATCH_WAIT_S`.
 3. Older calls: Health page → **Summarize existing calls** (admin), same as `POST /api/admin/summarize-backfill`.
 4. At the Claude cap, summarize jobs wait with translate jobs. A re-transcription clears the old summary.
+5. **Deploy `uic-api` before `uic-worker`.** An older API rejects the worker's `summarize` claims (HTTP 400, logged every poll) until it is updated.
 
 ## Call list export (CSV)
 Calls page → **Export CSV** (managers and admins): the current filters, newest first, up to 10,000 calls, with summary, action items and transcripts (English and original). Every export is recorded in the audit log (`EXPORT`). No env var needed.

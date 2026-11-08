@@ -164,6 +164,17 @@ describe("summary result", () => {
   });
 });
 
+describe("queued summary on re-transcription", () => {
+  it("drops a queued summary (it would read untranslated text); the translation queues a fresh one", async () => {
+    const { callId, jobId } = await summarizeReady(0);
+    const again = await t.db.job.create({ data: { callId, status: "RUNNING", lockedBy: "w2", lockedAt: new Date() } });
+    expect((await inject("POST", `/internal/jobs/${again.id}/result`, { ok: true, workerId: "w2", text: "new", provider: "p" })).statusCode).toBe(204);
+    expect((await t.db.job.findUniqueOrThrow({ where: { id: jobId } })).status).toBe("FAILED");
+    expect(await t.db.job.count({ where: { callId, kind: "summarize", status: "QUEUED" } })).toBe(0);
+    expect(await t.db.job.count({ where: { callId, kind: "translate", status: "QUEUED" } })).toBe(1);
+  });
+});
+
 describe("Claude cap covers summaries", () => {
   it("stops handing out summarize jobs at the cap", async () => {
     await summarizeReady(0);

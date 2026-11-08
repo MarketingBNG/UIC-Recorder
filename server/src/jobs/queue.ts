@@ -158,6 +158,11 @@ export async function completeJob(
       data: { status: "FAILED", lockedBy: null, lockedAt: null, lastError: SUPERSEDED, finishedAt: new Date() },
     });
     if (opts.translate) {
+      // A queued summary would read the new, untranslated text: drop it; the translation queues a fresh one.
+      await tx.job.updateMany({
+        where: { callId: job.callId, kind: "summarize", status: "QUEUED" },
+        data: { status: "FAILED", lastError: SUPERSEDED, finishedAt: new Date() },
+      });
       // A queued one is fine: it reads the new transcript when claimed.
       const open = await tx.job.findFirst({
         where: { callId: job.callId, kind: "translate", status: "QUEUED" },

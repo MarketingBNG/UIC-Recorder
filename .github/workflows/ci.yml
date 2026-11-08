@@ -21,6 +21,9 @@ jobs:
     defaults:
       run:
         working-directory: server
+    env:
+      # prisma.config.ts reads DATABASE_URL; generate needs a value but never connects.
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

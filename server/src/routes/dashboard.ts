@@ -7,7 +7,7 @@ import { DeviceConfig, getSettings } from "../settings.js";
 import { bucketName, callsWithoutRecordings, isThrottled } from "../devices/health.js";
 import { firefliesUsage } from "../fireflies/budget.js";
 import { compressionStats, queueCompressionBackfill, queueSummaryBackfill, queueTranslationBackfill } from "../jobs/queue.js";
-import { EXPORT_MAX_ROWS, callsCsv } from "../calls/export.js";
+import { BOM, CSV_HEADER, EXPORT_MAX_ROWS, csvLines } from "../calls/export.js";
 import { cliqSender } from "../alerts/cliq.js";
 import { throughput } from "../alerts/metrics.js";
 import { CostSettings, getCostSettings, saveCostSettings, translationUsage } from "../translation/cost.js";
@@ -146,31 +146,42 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   app.get("/api/calls/export", managers, async (req, reply) => {
     const q = ListQuery.omit({ cursor: true, limit: true }).parse(req.query);
     const where = await listWhere(req, { ...q, limit: EXPORT_MAX_ROWS });
-    const rows = await deps.db.call.findMany({
-      where,
-      orderBy: [{ startedAt: "desc" }, { id: "desc" }],
-      take: EXPORT_MAX_ROWS,
-      select: {
-        id: true,
-        startedAt: true,
-        direction: true,
-        phoneE164: true,
-        phoneRaw: true,
-        contactName: true,
-        durationS: true,
-        status: true,
-        user: { select: { name: true, email: true } },
-        transcript: {
-          select: { language: true, text: true, textEn: true, summary: true, actionItems: true, sentiment: true, tags: true },
-        },
+    // Pages of 500 so only the CSV text is held, not thousands of Prisma rows with their transcripts.
+    const select = {
+      id: true,
+      startedAt: true,
+      direction: true,
+      phoneE164: true,
+      phoneRaw: true,
+      contactName: true,
+      durationS: true,
+      status: true,
+      user: { select: { name: true, email: true } },
+      transcript: {
+        select: { language: true, text: true, textEn: true, summary: true, actionItems: true, sentiment: true, tags: true },
       },
-    });
-    await audit(req, "EXPORT", undefined, { rows: rows.length, filters: { ...q, q: q.q ? "(search)" : undefined } });
+    } satisfies Prisma.CallSelect;
+    const lines = [`${BOM}${CSV_HEADER}`];
+    let cursor: string | undefined;
+    while (lines.length - 1 < EXPORT_MAX_ROWS) {
+      const take = Math.min(500, EXPORT_MAX_ROWS - (lines.length - 1));
+      const page = await deps.db.call.findMany({
+        where,
+        orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+        take,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select,
+      });
+      lines.push(...csvLines(page));
+      if (page.length < take) break;
+      cursor = page.at(-1)!.id;
+    }
+    await audit(req, "EXPORT", undefined, { rows: lines.length - 1, filters: { ...q, q: q.q ? "(search)" : undefined } });
     const stamp = new Date().toISOString().slice(0, 10);
     reply.header("content-type", "text/csv; charset=utf-8");
     reply.header("content-disposition", `attachment; filename="calls-${stamp}.csv"`);
     reply.header("cache-control", "private, no-store");
-    return callsCsv(rows);
+    return `${lines.join("\r\n")}\r\n`;
   });
 
   app.get("/api/calls/:id", anyone, async (req) => {

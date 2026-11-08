@@ -55,8 +55,13 @@ export function csvCell(value: unknown): string {
 
 const list = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === "string").join("; ") : "");
 
-export function callsCsv(rows: ExportRow[]): string {
-  const lines = [EXPORT_COLUMNS.join(",")];
+export const CSV_HEADER = EXPORT_COLUMNS.join(",");
+/** Byte order mark, so Excel opens UTF-8 (Hindi / Urdu text) correctly. */
+export const BOM = "﻿";
+
+/** CSV lines (no header) for some rows. */
+export function csvLines(rows: ExportRow[]): string[] {
+  const lines: string[] = [];
   for (const r of rows) {
     const t = r.transcript;
     const cells = [
@@ -78,6 +83,10 @@ export function callsCsv(rows: ExportRow[]): string {
     ];
     lines.push(cells.map(csvCell).join(","));
   }
-  // BOM so Excel opens UTF-8 (Hindi / Urdu text) correctly.
-  return `﻿${lines.join("\r\n")}\r\n`;
+  return lines;
+}
+
+/** Whole file: BOM, header, one line per call. */
+export function callsCsv(rows: ExportRow[]): string {
+  return `${BOM}${[CSV_HEADER, ...csvLines(rows)].join("\r\n")}\r\n`;
 }
