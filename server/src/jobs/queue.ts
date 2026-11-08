@@ -1,4 +1,5 @@
 import type { Db } from "../db.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { claudeCostUsd } from "../translation/cost.js";
 
 export const MAX_ATTEMPTS = 5;
@@ -6,9 +7,11 @@ export const STALE_LOCK_MINUTES = 10;
 /** lastError of a translate job replaced by a newer transcript (not a real failure). */
 export const SUPERSEDED = "superseded by re-transcription";
 
-export const JOB_KINDS = ["transcribe", "translate", "compress"] as const;
+export const JOB_KINDS = ["transcribe", "translate", "compress", "summarize"] as const;
 /** Kinds that run on an already TRANSCRIBED call and never change its status. */
-export const SIDE_KINDS = ["translate", "compress"] as const;
+export const SIDE_KINDS = ["translate", "compress", "summarize"] as const;
+/** Kinds that call Claude: their cost counts toward the monthly cap (src/translation/cost.ts). */
+export const CLAUDE_KINDS = ["translate", "summarize"] as const;
 /** Stored audio above this bitrate is worth re-encoding (phones upload ~24 kbps AAC). */
 export const COMPRESS_MIN_BPS = 40_000;
 /** Calls with no recorded duration are compressed when bigger than this (~28 min at the phones' 24 kbps). */
@@ -127,7 +130,7 @@ export async function completeJob(
   jobId: string,
   workerId: string,
   result: TranscriptResult,
-  opts: { translate?: boolean; compress?: boolean } = {},
+  opts: { translate?: boolean; compress?: boolean; summarize?: boolean } = {},
 ) {
   return db.$transaction(async (tx) => {
     const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "transcribe" } });
@@ -143,6 +146,7 @@ export async function completeJob(
       translationInputTokens: null,
       translationOutputTokens: null,
       translationCostUsd: null,
+      ...EMPTY_SUMMARY,
     };
     await tx.transcript.upsert({ where: { callId: job.callId }, create: { callId: job.callId, ...data }, update: data });
     await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
@@ -150,7 +154,7 @@ export async function completeJob(
     // A running translate job already read the old transcript: take it out of play so
     // its later result is rejected (lock lost) instead of overwriting the new segments.
     await tx.job.updateMany({
-      where: { callId: job.callId, kind: "translate", status: "RUNNING" },
+      where: { callId: job.callId, kind: { in: [...CLAUDE_KINDS] }, status: "RUNNING" },
       data: { status: "FAILED", lockedBy: null, lockedAt: null, lastError: SUPERSEDED, finishedAt: new Date() },
     });
     if (opts.translate) {
@@ -160,6 +164,9 @@ export async function completeJob(
         select: { id: true },
       });
       if (!open) await tx.job.create({ data: { callId: job.callId, kind: "translate", priority: job.priority } });
+    } else if (opts.summarize) {
+      // No English step: summarize the original text straight away.
+      await queueSummary(tx, job.callId, job.priority);
     }
     if (opts.compress) await queueCompression(tx, job.callId);
     return true;
@@ -192,12 +199,18 @@ export async function recordTranslationCost(db: Db, jobId: string, model: string
   if (cost !== null) {
     await db.$executeRaw`
       UPDATE "jobs" SET "cost_usd" = coalesce("cost_usd", 0) + ${cost}, "cost_at" = now()
-      WHERE "id" = ${jobId}::uuid AND "kind" = 'translate'`;
+      WHERE "id" = ${jobId}::uuid AND "kind" = ANY(${[...CLAUDE_KINDS]}::text[])`;
   }
   return cost;
 }
 
-export async function completeTranslation(db: Db, jobId: string, workerId: string, result: TranslationResult) {
+export async function completeTranslation(
+  db: Db,
+  jobId: string,
+  workerId: string,
+  result: TranslationResult,
+  opts: { summarize?: boolean } = {},
+) {
   const cost = await recordTranslationCost(db, jobId, result.model, result.usage);
   return db.$transaction(async (tx) => {
     const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "translate" } });
@@ -215,6 +228,8 @@ export async function completeTranslation(db: Db, jobId: string, workerId: strin
     });
     if (count !== 1) return false;
     await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
+    // The summary reads the English text, so it is queued once the translation is stored.
+    if (opts.summarize) await queueSummary(tx, job.callId, job.priority);
     return true;
   });
 }
@@ -315,4 +330,86 @@ export async function compressionStats(db: Db) {
     eligibleCalls: Number(row?.eligible ?? 0),
     queuedJobs: Number(row?.queued ?? 0),
   };
+}
+
+// ---- Summaries (Milestone 5) -----------------------------------------------
+
+/** Transcript summary columns, cleared whenever the transcript is replaced. */
+const EMPTY_SUMMARY = {
+  summary: null,
+  actionItems: Prisma.DbNull,
+  sentiment: null,
+  tags: Prisma.DbNull,
+  speakerRoles: Prisma.DbNull,
+  summaryModel: null,
+  summaryInputTokens: null,
+  summaryOutputTokens: null,
+  summaryCostUsd: null,
+  summarizedAt: null,
+};
+
+/** Queues a summarize job for a call unless one is already queued (a running one is superseded by the caller). */
+async function queueSummary(tx: Tx, callId: string, priority: number): Promise<void> {
+  const open = await tx.job.findFirst({ where: { callId, kind: "summarize", status: "QUEUED" }, select: { id: true } });
+  if (!open) await tx.job.create({ data: { callId, kind: "summarize", priority } });
+}
+
+export const SENTIMENTS = ["positive", "neutral", "negative", "mixed"] as const;
+export const SPEAKER_ROLES = ["Agent", "Customer", "Unknown"] as const;
+
+export interface SummaryResult {
+  model: string;
+  summary: string;
+  actionItems: string[];
+  sentiment: (typeof SENTIMENTS)[number];
+  tags: string[];
+  speakerRoles: { speaker: string; role: (typeof SPEAKER_ROLES)[number] }[];
+  usage?: TranslationUsage | undefined;
+}
+
+/**
+ * Stores the summary for a summarize job this worker holds. Returns false if the lock was lost.
+ * The Claude cost is recorded on the job either way (it counts toward the monthly cap).
+ */
+export async function completeSummary(db: Db, jobId: string, workerId: string, result: SummaryResult) {
+  const cost = await recordTranslationCost(db, jobId, result.model, result.usage);
+  return db.$transaction(async (tx) => {
+    const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "summarize" } });
+    if (!job) return false;
+    const { count } = await tx.transcript.updateMany({
+      where: { callId: job.callId },
+      data: {
+        summary: result.summary,
+        actionItems: result.actionItems,
+        sentiment: result.sentiment,
+        tags: result.tags,
+        speakerRoles: result.speakerRoles,
+        summaryModel: result.model,
+        summaryInputTokens: result.usage?.inputTokens ?? null,
+        summaryOutputTokens: result.usage?.outputTokens ?? null,
+        summaryCostUsd: cost,
+        summarizedAt: new Date(),
+      },
+    });
+    if (count !== 1) return false;
+    await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
+    return true;
+  });
+}
+
+/**
+ * Queues a summarize job (priority 0, so the worker batches them) for every transcript without a summary,
+ * skipping calls whose English translation is still on its way (that queues the summary itself when enabled).
+ */
+export async function queueSummaryBackfill(db: Db): Promise<number> {
+  return db.$executeRaw`
+    INSERT INTO "jobs" ("id", "call_id", "kind", "priority", "status", "attempts", "run_after", "created_at", "updated_at")
+    SELECT gen_random_uuid(), t."call_id", 'summarize', 0, 'QUEUED', 0, now(), now(), now()
+    FROM "transcripts" t
+    WHERE t."summary" IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM "jobs" j
+        WHERE j."call_id" = t."call_id" AND j."status" IN ('QUEUED', 'RUNNING')
+          AND (j."kind" = 'summarize' OR (j."kind" = 'translate' AND t."text_en" IS NULL))
+      )`;
 }

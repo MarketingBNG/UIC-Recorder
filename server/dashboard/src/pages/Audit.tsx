@@ -15,6 +15,7 @@ export const AUDIT_LABELS: Record<AuditAction, string> = {
   SETTINGS_CHANGE: "Settings changed",
   CLIENT_LIST_CHANGE: "Client list changed",
   RETENTION_DELETE: "Retention deleted audio",
+  EXPORT: "Exported calls (CSV)",
 };
 
 /** One-line summary of the detail JSON (same wording as the Android Audit screen). */
@@ -23,6 +24,8 @@ export function auditSummary(e: Pick<AuditEntry, "action" | "detail">): string {
   switch (e.action) {
     case "SEARCH":
       return typeof d["q"] === "string" ? `"${d["q"]}"` : "";
+    case "EXPORT":
+      return `${d["rows"] ?? 0} calls`;
     case "RETENTION_DELETE":
       return `${d["deleted"] ?? 0} audio files older than ${d["retentionMonths"] ?? "?"} months`;
     case "CLIENT_LIST_CHANGE":

@@ -45,6 +45,14 @@ def translation_payload(segments: list[dict], usage: dict, default_model: str, b
 
 
 class Translator:
+    """Claims `KIND` jobs; subclasses (the summarizer) override the work methods and the model."""
+
+    KIND = "translate"
+
+    @property
+    def model(self) -> str:
+        return self.settings.translate_model
+
     def __init__(self, api, client, settings: Settings, stopping: Callable[[], bool] = lambda: False,
                  clock: Callable[[], float] = time.monotonic, poll_s: float = 30) -> None:
         self.api, self.client, self.settings = api, client, settings
@@ -62,7 +70,7 @@ class Translator:
         import anthropic
 
         t = cls(api, anthropic.Anthropic(api_key=settings.anthropic_api_key), settings, stopping)
-        t._thread = threading.Thread(target=t.run, name="translate", daemon=True)
+        t._thread = threading.Thread(target=t.run, name=cls.KIND, daemon=True)
         t._thread.start()
         return t
 
@@ -73,7 +81,7 @@ class Translator:
     # ---- loop ----
 
     def run(self) -> None:
-        beat = threading.Thread(target=self._beat_loop, name="translate-heartbeat", daemon=True)
+        beat = threading.Thread(target=self._beat_loop, name=f"{self.KIND}-heartbeat", daemon=True)
         beat.start()
         idle = 1.0
         try:
@@ -103,9 +111,9 @@ class Translator:
         room = min(CLAIM_MAX, self.settings.translate_batch_max - len(self.pending))
         if not self.stopping() and room > 0:
             try:
-                jobs = self.api.claim(room, ("translate",))
+                jobs = self.api.claim(room, (self.KIND,))
             except Exception:
-                log.exception("translate claim failed")
+                log.exception("claim failed", kind=self.KIND)
         live = []
         with self.lock:
             for job in jobs:
@@ -134,7 +142,7 @@ class Translator:
             jobs, self.pending, self.pending_since = self.pending, [], None
         if not jobs:
             return
-        self.batch_thread = threading.Thread(target=self._safe_batch, args=(jobs,), name="translate-batch", daemon=True)
+        self.batch_thread = threading.Thread(target=self._safe_batch, args=(jobs,), name=f"{self.KIND}-batch", daemon=True)
         self.batch_thread.start()
 
     def _batch_running(self) -> bool:
@@ -172,13 +180,13 @@ class Translator:
         payload: dict = {"ok": False, "error": f"{type(e).__name__}: {e}"[:2000], "retryable": True}
         if usage := getattr(e, "usage", None):
             # Claude already charged for these tokens; the API adds them to the monthly spend.
-            payload["model"] = usage.get("model") or self.settings.translate_model
+            payload["model"] = usage.get("model") or self.model
             payload["usage"] = {"inputTokens": usage.get("input_tokens", 0), "outputTokens": usage.get("output_tokens", 0),
                                 "batch": False}
         try:
             self.api.post_result(job_id, payload)
         except Exception:
-            log.exception("could not report translate failure", job_id=job_id)
+            log.exception("could not report failure", kind=self.KIND, job_id=job_id)
 
     def translate_live(self, job: dict) -> None:
         job_id = job["jobId"]
@@ -199,7 +207,7 @@ class Translator:
         try:
             self.translate_backlog(jobs)
         except Exception:
-            log.exception("translate batch crashed")
+            log.exception("batch crashed", kind=self.KIND)
         finally:
             for job in jobs:
                 self._release(job["jobId"])

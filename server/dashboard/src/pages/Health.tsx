@@ -68,6 +68,7 @@ export function HealthPage() {
       <FirefliesPanel />
       <TranslationPanel />
       {isAdmin && <TranslateBackfill />}
+      {isAdmin && <SummarizeBackfill />}
       {isAdmin && stats.data?.compression && <CompressBackfill c={stats.data.compression} />}
       {isAdmin && <TestAlert enabled={stats.data?.alertsEnabled} />}
 
@@ -319,6 +320,34 @@ function TranslateBackfill() {
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} transcript${run.data.queued === 1 ? "" : "s"} for translation.` : "Nothing to queue: every transcript is translated or already queued.")}
+      </p>
+      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
+    </section>
+  );
+}
+
+/** Admin: queue AI summaries for every transcript that has none yet (counts toward the Claude cap). */
+function SummarizeBackfill() {
+  const run = useMutation({
+    mutationFn: () => api<TranslateBackfillResult>("/api/admin/summarize-backfill", { method: "POST", body: {} }),
+  });
+  return (
+    <section aria-labelledby="summarize-h" className="card mb-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="summarize-h" className="font-semibold">
+            AI call summaries
+          </h2>
+          <p className="text-sm text-slate-500">
+            Summary, action items, sentiment, tags and Agent / Customer labels. Queue older calls here (batch rate; uses the Claude monthly cap).
+          </p>
+        </div>
+        <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate()}>
+          {run.isPending ? "Queuing…" : "Summarize existing calls"}
+        </button>
+      </div>
+      <p className="mt-2 text-sm" role="status" aria-live="polite">
+        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} call${run.data.queued === 1 ? "" : "s"} for a summary.` : "Nothing to queue: every call is summarized or already queued.")}
       </p>
       {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
     </section>

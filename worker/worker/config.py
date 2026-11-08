@@ -39,6 +39,9 @@ class Settings:
     translate_model: str = "claude-opus-5-5"
     translate_batch_max: int = 100
     translate_batch_wait_s: float = 900
+    # AI call summaries (summarize jobs; same batch size / wait as translation)
+    summary_model: str = "claude-sonnet-5-5"
+    summarize_enabled: bool = True
     # Sarvam (overflow when the Fireflies budget runs out)
     sarvam_api_key: str | None = None
     sarvam_model: str = "saaras:v3"
@@ -76,6 +79,9 @@ class Settings:
             # Backlog translations: one Message Batch per this many calls, or after this long.
             translate_batch_max=max(1, int(e.get("TRANSLATE_BATCH_MAX", "100"))),
             translate_batch_wait_s=float(e.get("TRANSLATE_BATCH_WAIT_S", "900")),
+            summary_model=e.get("SUMMARY_MODEL") or "claude-sonnet-5-5",
+            # Summaries are only queued when the server has SUMMARIZE_ENABLED (or an admin backfill).
+            summarize_enabled=(e.get("SUMMARIZE_ENABLED") or "true").lower() not in ("false", "0", "no"),
             sarvam_api_key=e.get("SARVAM_API_KEY") or None,
             sarvam_model=e.get("SARVAM_MODEL") or "saaras:v3",
             # BCP-47 code, or "unknown" to auto-detect per chunk.

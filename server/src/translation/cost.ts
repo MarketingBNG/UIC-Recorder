@@ -73,11 +73,12 @@ export async function translateCapped(db: Tx, now = new Date()): Promise<boolean
  * (every worker's running batch and live calls, possibly several batches at once) can push spend past it.
  */
 export async function translationUsage(db: Db, now = new Date()) {
-  const [s, spent, queued, monthJobs] = await Promise.all([
+  const [s, spent, queued, monthJobs, monthSummaries] = await Promise.all([
     getCostSettings(db),
     monthSpendUsd(db, now),
     db.job.count({ where: { kind: "translate", status: "QUEUED" } }),
-    db.job.count({ where: { costAt: { gte: monthStart(now), lt: nextMonthStart(now) } } }),
+    db.job.count({ where: { kind: "translate", costAt: { gte: monthStart(now), lt: nextMonthStart(now) } } }),
+    db.job.count({ where: { kind: "summarize", costAt: { gte: monthStart(now), lt: nextMonthStart(now) } } }),
   ]);
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const pct = s.translateBudgetUsd > 0 ? Math.round((spent / s.translateBudgetUsd) * 1000) / 10 : 100;
@@ -88,7 +89,9 @@ export async function translationUsage(db: Db, now = new Date()) {
     pct,
     capped: spent >= s.translateBudgetUsd,
     translatedThisMonth: monthJobs,
-    avgCostUsd: monthJobs > 0 ? Math.round((spent / monthJobs) * 10000) / 10000 : null,
+    // Spend covers translations and AI summaries (one Claude cap for both).
+    summarizedThisMonth: monthSummaries,
+    avgCostUsd: monthJobs + monthSummaries > 0 ? Math.round((spent / (monthJobs + monthSummaries)) * 10000) / 10000 : null,
     queuedJobs: queued,
     sarvamOverflow: s.sarvamOverflow,
   };

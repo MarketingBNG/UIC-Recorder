@@ -153,22 +153,24 @@ class ApiClient(
     suspend fun me(): Me = get("/api/me")
 
     suspend fun calls(filter: CallFilter = CallFilter(), cursor: String? = null, limit: Int = 20): CallPage =
-        get(
-            "/api/calls",
-            mapOf(
-                "q" to filter.q?.takeIf { it.isNotBlank() },
-                "phone" to filter.phone?.takeIf { it.isNotBlank() },
-                "userId" to filter.userId,
-                "direction" to filter.direction?.name,
-                "status" to filter.status?.name,
-                "from" to filter.from,
-                "to" to filter.to,
-                "cursor" to cursor,
-                "limit" to limit.toString(),
-            ),
-        )
+        get("/api/calls", filterQuery(filter) + mapOf("cursor" to cursor, "limit" to limit.toString()))
+
+    private fun filterQuery(filter: CallFilter): Map<String, String?> = mapOf(
+        "q" to filter.q?.takeIf { it.isNotBlank() },
+        "phone" to filter.phone?.takeIf { it.isNotBlank() },
+        "userId" to filter.userId,
+        "direction" to filter.direction?.name,
+        "status" to filter.status?.name,
+        "from" to filter.from,
+        "to" to filter.to,
+    )
 
     suspend fun call(id: String): CallDetail = get("/api/calls/$id")
+
+    /** CSV of the filtered list (managers/admins; audit-logged, max 10,000 calls). Fetch with a Bearer header. */
+    fun exportUrl(filter: CallFilter): String = url("/api/calls/export", filterQuery(filter)).toString()
+
+    suspend fun summarizeBackfill(): TranslateBackfill = post("/api/admin/summarize-backfill", JsonObject(emptyMap()))
 
     /** Range-capable audio URL; play it with a Media3 OkHttpDataSource built on [http] (adds Bearer). */
     fun audioUrl(id: String): String = url("/api/calls/$id/audio").toString()

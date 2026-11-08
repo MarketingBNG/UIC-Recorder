@@ -58,7 +58,19 @@ import androidx.paging.LoadState
 import androidx.paging.compose.LazyPagingItems
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
+import android.app.DownloadManager
+import android.content.Context
+import android.net.Uri
+import android.os.Environment
+import android.widget.Toast
+import androidx.compose.material3.AssistChip
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.usaindiacfo.uicrecorder.AppContainer
 import com.usaindiacfo.uicrecorder.appContainer
+import com.usaindiacfo.uicrecorder.data.api.CallFilter
+import java.time.LocalDate
+import kotlinx.coroutines.launch
 import com.usaindiacfo.uicrecorder.data.api.ApiException
 import com.usaindiacfo.uicrecorder.data.api.CallStatus
 import com.usaindiacfo.uicrecorder.data.api.Direction
@@ -73,6 +85,8 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
     val items = vm.calls.collectAsLazyPagingItems()
     val cached = vm.cached.collectAsLazyPagingItems()
     val showPerson = user?.canManage == true
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val refresh = items.loadState.refresh
     val offline = refresh is LoadState.Error && items.itemCount == 0 && refresh.error !is ApiException
@@ -91,7 +105,10 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         )
-        FilterRow(filter, vm, showPerson, people.map { it.id to (it.name ?: it.email) })
+        FilterRow(filter, vm, showPerson, people.map { it.id to (it.name ?: it.email) }) {
+            // Managers / admins: CSV of the current filters, saved to Downloads (the server audit-logs it).
+            scope.launch { exportCsv(context, container, filter.toApi()) }
+        }
 
         if (offline) Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -119,7 +136,7 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
 }
 
 @Composable
-private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boolean, people: List<Pair<String, String>>) {
+private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boolean, people: List<Pair<String, String>>, onExport: () -> Unit) {
     var dirOpen by remember { mutableStateOf(false) }
     var dateOpen by remember { mutableStateOf(false) }
     var personOpen by remember { mutableStateOf(false) }
@@ -152,7 +169,28 @@ private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boole
         if (f.direction != null || f.date != DatePreset.ALL || f.userId != null) {
             IconButton(onClick = vm::clearFilters) { Icon(Icons.Default.Close, "Clear filters") }
         }
+        if (showPerson) AssistChip(onClick = onExport, label = { Text("Export CSV") })
     }
+}
+
+/** Queues the CSV in the system DownloadManager with a fresh access token (same as recording downloads). */
+private suspend fun exportCsv(context: Context, container: AppContainer, filter: CallFilter) {
+    runCatching { container.apiClient.me() }
+    val token = container.tokenStore.accessToken
+    if (token == null) {
+        Toast.makeText(context, "Sign in again to export.", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val name = "calls-${LocalDate.now()}.csv"
+    val req = DownloadManager.Request(Uri.parse(container.apiClient.exportUrl(filter)))
+        .addRequestHeader("Authorization", "Bearer $token")
+        .setTitle("Calls export")
+        .setMimeType("text/csv")
+        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+    runCatching { context.getSystemService(DownloadManager::class.java).enqueue(req) }
+        .onSuccess { Toast.makeText(context, "Exporting to Downloads/$name", Toast.LENGTH_SHORT).show() }
+        .onFailure { Toast.makeText(context, "Export failed: ${it.message}", Toast.LENGTH_LONG).show() }
 }
 
 @Composable

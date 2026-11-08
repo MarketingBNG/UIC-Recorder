@@ -6,14 +6,15 @@ import { Prisma, type AuditAction, type User } from "../generated/prisma/client.
 import { DeviceConfig, getSettings } from "../settings.js";
 import { bucketName, callsWithoutRecordings, isThrottled } from "../devices/health.js";
 import { firefliesUsage } from "../fireflies/budget.js";
-import { compressionStats, queueCompressionBackfill, queueTranslationBackfill } from "../jobs/queue.js";
+import { compressionStats, queueCompressionBackfill, queueSummaryBackfill, queueTranslationBackfill } from "../jobs/queue.js";
+import { EXPORT_MAX_ROWS, callsCsv } from "../calls/export.js";
 import { cliqSender } from "../alerts/cliq.js";
 import { throughput } from "../alerts/metrics.js";
 import { CostSettings, getCostSettings, saveCostSettings, translationUsage } from "../translation/cost.js";
 import { MAX_CLIENT_NUMBERS, MIN_KEY_DIGITS, importClientNumbers, numberKey, parseClientCsv } from "../privacy/clientNumbers.js";
 import { PrivacySettings, getPrivacySettings, savePrivacySettings } from "../privacy/settings.js";
 
-const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE"] as const;
+const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE", "EXPORT"] as const;
 const AuditQuery = z.object({
   action: z.enum(AUDIT_ACTIONS).optional(),
   userId: z.uuid().optional(),
@@ -93,8 +94,8 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     return { id: u.id, email: u.email, name: u.name, role: u.role, team: u.team, pictureUrl: u.pictureUrl };
   });
 
-  app.get("/api/calls", anyone, async (req) => {
-    const q = ListQuery.parse(req.query);
+  /** The call list's filters (role scope, fields, transcript search) as a Prisma where. Audits searches. */
+  const listWhere = async (req: FastifyRequest, q: z.infer<typeof ListQuery>): Promise<Prisma.CallWhereInput> => {
     const where: Prisma.CallWhereInput = { AND: [callScope(currentUser(req))] };
     const and = where.AND as Prisma.CallWhereInput[];
     if (q.userId) and.push({ userId: q.userId });
@@ -109,6 +110,12 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       and.push({ id: { in: hits.map((h) => h.id) } });
       audit(req, "SEARCH", undefined, { q: q.q });
     }
+    return where;
+  };
+
+  app.get("/api/calls", anyone, async (req) => {
+    const q = ListQuery.parse(req.query);
+    const where = await listWhere(req, q);
     const rows = await deps.db.call.findMany({
       where,
       orderBy: [{ startedAt: "desc" }, { id: "desc" }],
@@ -132,21 +139,75 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     return { items, nextCursor: more ? items.at(-1)?.id : null };
   });
 
+  /**
+   * CSV of the filtered call list with summaries and transcripts (same filters as /api/calls, newest first,
+   * at most EXPORT_MAX_ROWS). Managers and admins only; every export is audit-logged.
+   */
+  app.get("/api/calls/export", managers, async (req, reply) => {
+    const q = ListQuery.omit({ cursor: true, limit: true }).parse(req.query);
+    const where = await listWhere(req, { ...q, limit: EXPORT_MAX_ROWS });
+    const rows = await deps.db.call.findMany({
+      where,
+      orderBy: [{ startedAt: "desc" }, { id: "desc" }],
+      take: EXPORT_MAX_ROWS,
+      select: {
+        id: true,
+        startedAt: true,
+        direction: true,
+        phoneE164: true,
+        phoneRaw: true,
+        contactName: true,
+        durationS: true,
+        status: true,
+        user: { select: { name: true, email: true } },
+        transcript: {
+          select: { language: true, text: true, textEn: true, summary: true, actionItems: true, sentiment: true, tags: true },
+        },
+      },
+    });
+    await audit(req, "EXPORT", undefined, { rows: rows.length, filters: { ...q, q: q.q ? "(search)" : undefined } });
+    const stamp = new Date().toISOString().slice(0, 10);
+    reply.header("content-type", "text/csv; charset=utf-8");
+    reply.header("content-disposition", `attachment; filename="calls-${stamp}.csv"`);
+    reply.header("cache-control", "private, no-store");
+    return callsCsv(rows);
+  });
+
   app.get("/api/calls/:id", anyone, async (req) => {
     const call = await deps.db.call.findFirst({
       where: { AND: [{ id: idParam(req) }, callScope(currentUser(req))] },
       include: {
         user: { select: { id: true, name: true, email: true } },
         transcript: {
-          select: { text: true, language: true, provider: true, segments: true, textEn: true, translationModel: true },
+          select: {
+            text: true,
+            language: true,
+            provider: true,
+            segments: true,
+            textEn: true,
+            translationModel: true,
+            summary: true,
+            actionItems: true,
+            sentiment: true,
+            tags: true,
+            speakerRoles: true,
+            summaryModel: true,
+          },
         },
       },
     });
     if (!call) throw new HttpError(404, "Not found");
-    const pending = call.transcript
-      ? await deps.db.job.count({ where: { callId: call.id, kind: "translate", status: { in: ["QUEUED", "RUNNING"] } } })
-      : 0;
-    const transcript = call.transcript ? { ...call.transcript, translationPending: pending > 0 } : null;
+    const open = call.transcript
+      ? await deps.db.job.groupBy({
+          by: ["kind"],
+          where: { callId: call.id, kind: { in: ["translate", "summarize"] }, status: { in: ["QUEUED", "RUNNING"] } },
+          _count: true,
+        })
+      : [];
+    const pending = (kind: string) => open.some((g) => g.kind === kind);
+    const transcript = call.transcript
+      ? { ...call.transcript, translationPending: pending("translate"), summaryPending: pending("summarize") }
+      : null;
     return { ...call, transcript, fileSize: call.fileSize?.toString() ?? null };
   });
 
@@ -261,6 +322,13 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   app.post("/api/admin/translate-backfill", admins, async (req) => {
     const queued = await queueTranslationBackfill(deps.db);
     req.log.info({ queued, by: currentUser(req).id }, "translate backfill queued");
+    return { queued };
+  });
+
+  /** Queues an AI summary for every transcript that doesn't have one yet (counts toward the Claude cap). */
+  app.post("/api/admin/summarize-backfill", admins, async (req) => {
+    const queued = await queueSummaryBackfill(deps.db);
+    req.log.info({ queued, by: currentUser(req).id }, "summary backfill queued");
     return { queued };
   });
 

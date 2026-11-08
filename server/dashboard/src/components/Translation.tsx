@@ -58,6 +58,12 @@ function Usage({ u }: { u: TranslationUsage }) {
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
         <dt className="text-slate-500">Calls translated</dt>
         <dd className="tabular-nums">{u.translatedThisMonth}</dd>
+        {u.summarizedThisMonth !== undefined && (
+          <>
+            <dt className="text-slate-500">Calls summarized</dt>
+            <dd className="tabular-nums">{u.summarizedThisMonth}</dd>
+          </>
+        )}
         <dt className="text-slate-500">Average per call</dt>
         <dd className="tabular-nums">{u.avgCostUsd === null ? "-" : `$${u.avgCostUsd.toFixed(4)}`}</dd>
         <dt className="text-slate-500">Sarvam overflow</dt>

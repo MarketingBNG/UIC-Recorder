@@ -43,6 +43,14 @@ const schema = z.object({
     .default("true")
     .transform((v) => v !== "false" && v !== "0"),
 
+  // Queue an AI summary job (Claude: summary, action items, sentiment, tags, speaker roles) after every
+  // English translation, or after the transcript when TRANSLATE_ENABLED is off. Counts toward the Claude cap.
+  // Off by default; the admin "Summarize calls" button queues summaries for existing transcripts either way.
+  SUMMARIZE_ENABLED: z
+    .enum(["true", "false", "1", "0", ""])
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
+
   // Queue a compress job after transcription when the stored audio is above 40 kbps (worker needs ffmpeg).
   // Off by default: try the admin "Compress old recordings" button on a few calls first.
   COMPRESS_AFTER_TRANSCRIBE: z

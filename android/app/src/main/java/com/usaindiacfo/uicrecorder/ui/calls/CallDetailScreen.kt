@@ -103,13 +103,16 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
     LaunchedEffect(state.deleted) { if (state.deleted) onBack() }
 
     val transcript = state.transcriptText
+    val roles = remember(state.call) { speakerRoleMap(state.call?.transcript?.speakerRoles) }
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(state.call?.let(::titleOf) ?: "Call") },
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
                 actions = {
-                    if (transcript != null) IconButton(onClick = { shareText(context, transcript) }) { Icon(Icons.Default.Share, "Share transcript") }
+                    if (transcript != null) IconButton(onClick = {
+                        shareText(context, listOfNotNull(state.call?.transcript?.let(::summaryText), transcript).joinToString("\n\n"))
+                    }) { Icon(Icons.Default.Share, "Share transcript") }
                     if (user?.isAdmin == true && state.call != null) IconButton(onClick = { confirmDelete = true }, enabled = !state.deleting) {
                         Icon(Icons.Default.Delete, "Delete call")
                     }
@@ -140,6 +143,7 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
                             modifier = Modifier.padding(vertical = 16.dp),
                         )
                     }
+                    call.transcript?.let { t -> item(key = "summary") { SummaryCard(t, t.summaryPending) } }
                     item(key = "th") {
                         Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Transcript", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -155,7 +159,7 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
                         transcript == null -> item(key = "none") { Text("No transcript yet (${call.status.label().lowercase()})", style = MaterialTheme.typography.bodyMedium) }
                         state.segments.isEmpty() -> item(key = "text") { Text(transcript, style = MaterialTheme.typography.bodyMedium) }
                         else -> itemsIndexed(state.segments, key = { i, _ -> "s$i" }, contentType = { _, _ -> "seg" }) { _, s ->
-                            SegmentRow(s, state.showsEnglish, active = s.startMs != null && ps.positionMs >= s.startMs) {
+                            SegmentRow(s, state.showsEnglish, roles, active = s.startMs != null && ps.positionMs >= s.startMs) {
                                 if (hasAudio && s.startMs != null) player.playFrom(s.startMs)
                             }
                         }
@@ -228,7 +232,7 @@ private fun PlayerControls(ps: PlayerState, player: CallPlayer, fallbackDuration
 }
 
 @Composable
-private fun SegmentRow(s: Segment, english: Boolean, active: Boolean, onClick: () -> Unit) {
+private fun SegmentRow(s: Segment, english: Boolean, roles: Map<String, String>, active: Boolean, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().clickable(enabled = s.startMs != null, onClick = onClick).padding(vertical = 6.dp)) {
         Text(
             s.startMs?.let { formatDuration((it / 1000).toInt()) } ?: "",
@@ -237,7 +241,7 @@ private fun SegmentRow(s: Segment, english: Boolean, active: Boolean, onClick: (
             modifier = Modifier.width(52.dp),
         )
         Column(Modifier.weight(1f)) {
-            s.speaker?.let { Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold) }
+            s.speaker?.let { Text(speakerLabel(it, roles), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold) }
             Text(s.textIn(english), style = MaterialTheme.typography.bodyMedium)
         }
     }

@@ -7,7 +7,20 @@ import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
 import { CompressQuery, storeCompressedAudio } from "../calls/compress.js";
 import { ALLOWED_AUDIO_MIME } from "../storage/local.js";
-import { JOB_KINDS, claimJobs, claimOverflowJobs, completeJob, completeTranslation, failJob, heartbeatJob, recordTranslationCost } from "../jobs/queue.js";
+import {
+  CLAUDE_KINDS,
+  JOB_KINDS,
+  SENTIMENTS,
+  SPEAKER_ROLES,
+  claimJobs,
+  claimOverflowJobs,
+  completeJob,
+  completeSummary,
+  completeTranslation,
+  failJob,
+  heartbeatJob,
+  recordTranslationCost,
+} from "../jobs/queue.js";
 
 const Claim = z.object({
   workerId: z.string().min(1).max(100),
@@ -25,6 +38,17 @@ const Translation = z.object({
   model: z.string().min(1).max(100),
   textEn: z.string().max(4_000_000),
   segments: z.array(z.record(z.string(), z.unknown())).max(100_000),
+  usage: Usage.optional(),
+});
+
+const Summary = z.object({
+  workerId: z.string().min(1).max(100),
+  model: z.string().min(1).max(100),
+  summary: z.string().max(20_000),
+  actionItems: z.array(z.string().max(2000)).max(50),
+  sentiment: z.enum(SENTIMENTS),
+  tags: z.array(z.string().max(100)).max(20),
+  speakerRoles: z.array(z.object({ speaker: z.string().max(200), role: z.enum(SPEAKER_ROLES) })).max(50),
   usage: Usage.optional(),
 });
 
@@ -56,8 +80,9 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     const { workerId, limit, provider, kinds: asked } = Claim.parse(req.body);
     let kinds = asked;
     await touchWorker(deps.db, workerId);
-    // Claude monthly cap: translate jobs stay QUEUED until next month or a higher cap.
-    if (kinds.includes("translate") && (await translateCapped(deps.db))) kinds = kinds.filter((k) => k !== "translate");
+    // Claude monthly cap: translate and summarize jobs stay QUEUED until next month or a higher cap.
+    const claude: readonly string[] = CLAUDE_KINDS;
+    if (kinds.some((k) => claude.includes(k)) && (await translateCapped(deps.db))) kinds = kinds.filter((k) => !claude.includes(k));
     let jobs: Awaited<ReturnType<typeof claimJobs>> = [];
     if (provider === "sarvam") {
       // Never hand ordinary jobs to the paid overflow provider; translate jobs are still fine.
@@ -72,7 +97,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     if (jobs.length === 0) return { jobs: [] };
     const calls = await deps.db.call.findMany({
       where: { id: { in: jobs.map((j) => j.callId) } },
-      select: { id: true, mimeType: true, durationS: true, user: { select: { id: true } } },
+      select: { id: true, mimeType: true, durationS: true, user: { select: { id: true, name: true, email: true } } },
     });
     // Translation runs on an already TRANSCRIBED call; only transcription changes the call status.
     const transcribing = jobs.filter((j) => j.kind === "transcribe").map((j) => j.callId);
@@ -93,6 +118,8 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
         durationS: byId.get(j.callId)?.durationS ?? null,
         audioPath: `/internal/audio/${j.callId}`,
         maskPii,
+        // Summaries: the staff member on the call, so Claude can tell Agent from Customer.
+        ...(j.kind === "summarize" ? { agentName: byId.get(j.callId)?.user.name ?? byId.get(j.callId)?.user.email ?? null } : {}),
       })),
     };
   });
@@ -118,7 +145,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     const callId = z.uuid().parse(req.params.callId);
     const t = await deps.db.transcript.findUnique({
       where: { callId },
-      select: { callId: true, text: true, language: true, segments: true },
+      select: { callId: true, text: true, language: true, segments: true, textEn: true },
     });
     if (!t) throw new HttpError(404, "No transcript");
     return t;
@@ -142,6 +169,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
       ? await completeJob(deps.db, jobId, body.workerId, body, {
           translate: deps.config.TRANSLATE_ENABLED,
           compress: deps.config.COMPRESS_AFTER_TRANSCRIBE,
+          summarize: deps.config.SUMMARIZE_ENABLED,
         })
       : await failJob(deps.db, jobId, body.workerId, body.error, body.retryable);
     if (!ok) throw new HttpError(409, "Job is not locked by this worker");
@@ -151,8 +179,17 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/translation", resultOpts, async (req, reply) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const body = Translation.parse(req.body);
-    if (!(await completeTranslation(deps.db, jobId, body.workerId, body))) {
+    if (!(await completeTranslation(deps.db, jobId, body.workerId, body, { summarize: deps.config.SUMMARIZE_ENABLED }))) {
       throw new HttpError(409, "Job is not a translate job locked by this worker");
+    }
+    return reply.code(204).send();
+  });
+
+  app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/summary", resultOpts, async (req, reply) => {
+    const jobId = z.uuid().parse(req.params.jobId);
+    const body = Summary.parse(req.body);
+    if (!(await completeSummary(deps.db, jobId, body.workerId, body))) {
+      throw new HttpError(409, "Job is not a summarize job locked by this worker");
     }
     return reply.code(204).send();
   });

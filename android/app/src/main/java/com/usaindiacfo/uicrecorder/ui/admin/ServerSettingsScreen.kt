@@ -216,6 +216,9 @@ private fun ConfigEditor(
         TranslateBackfillSection()
 
         HorizontalDivider()
+        SummarizeBackfillSection()
+
+        HorizontalDivider()
         CompressBackfillSection()
 
         HorizontalDivider()
@@ -252,6 +255,36 @@ private fun TranslateBackfillSection() {
         enabled = !busy,
     ) { Text(if (busy) "Queuing…" else "Translate existing transcripts") }
     result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+/** Queues AI summaries (summary, action items, sentiment, tags, Agent / Customer) for calls that have none. */
+@Composable
+private fun SummarizeBackfillSection() {
+    val api = appContainer().apiClient
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf<String?>(null) }
+    Text("AI call summaries", style = MaterialTheme.typography.labelLarge)
+    Text("Queues a summary for older calls (batch rate; uses the Claude monthly cap).", style = MaterialTheme.typography.bodySmall)
+    OutlinedButton(
+        onClick = {
+            busy = true; result = null
+            scope.launch {
+                apiCall { api.summarizeBackfill() }
+                    .onSuccess { result = summarizeQueuedMessage(it.queued) }
+                    .onFailure { result = it.userMessage() }
+                busy = false
+            }
+        },
+        enabled = !busy,
+    ) { Text(if (busy) "Queuing…" else "Summarize existing calls") }
+    result?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+}
+
+internal fun summarizeQueuedMessage(queued: Int): String = when (queued) {
+    0 -> "Nothing to queue. Every call is summarized or already queued."
+    1 -> "Queued 1 call for a summary."
+    else -> "Queued $queued calls for a summary."
 }
 
 /** Re-encodes large old recordings to the phones' small AAC format (after transcription only). */

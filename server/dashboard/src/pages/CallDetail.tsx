@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, ApiError, isManager, type CallDetail } from "../api";
+import { api, ApiError, isManager, type CallDetail, type SpeakerRole } from "../api";
 import { useMe } from "../App";
 import { formatBytes, formatDuration, formatWhen, parseSegments, personName } from "../format";
 import { ConfirmDialog, DirectionTag, ErrorBox, Spinner, StatusBadge } from "../ui";
@@ -29,6 +29,9 @@ export function CallDetailPage() {
   const hasEnglish = !!call.data?.transcript?.textEn;
   const english = hasEnglish && (langChoice ?? "en") === "en";
   const segText = (s: { text: string; en: string | null }) => (english ? s.en ?? s.text : s.text);
+  // Agent / Customer label per speaker name, from the AI summary.
+  const roles = useMemo(() => roleMap(call.data?.transcript?.speakerRoles), [call.data]);
+  const speakerLabel = (sp: string) => (roles.get(sp) ? `${sp} (${roles.get(sp)})` : sp);
 
   const del = useMutation({
     mutationFn: () => api<void>(`/api/calls/${id}`, { method: "DELETE" }),
@@ -55,7 +58,7 @@ export function CallDetailPage() {
   const copy = async () => {
     const t = call.data?.transcript;
     if (!t) return;
-    const text = segments.length ? segments.map((s) => (s.speaker ? `${s.speaker}: ${segText(s)}` : segText(s))).join("\n")
+    const text = segments.length ? segments.map((s) => (s.speaker ? `${speakerLabel(s.speaker)}: ${segText(s)}` : segText(s))).join("\n")
       : english
         ? (t.textEn ?? t.text)
         : t.text;
@@ -193,6 +196,8 @@ export function CallDetailPage() {
             )}
           </section>
 
+          {c.transcript && <SummaryCard t={c.transcript} />}
+
           <section aria-labelledby="transcript-h" className="card p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
               <h2 id="transcript-h" className="font-semibold">
@@ -250,7 +255,7 @@ export function CallDetailPage() {
                         {s.startMs != null ? formatDuration(Math.floor(s.startMs / 1000)) : ""}
                       </span>
                       <span className="min-w-0">
-                        {s.speaker && <span className="mr-1 text-xs font-semibold">{s.speaker}</span>}
+                        {s.speaker && <span className="mr-1 text-xs font-semibold">{speakerLabel(s.speaker)}</span>}
                         <span className="text-sm leading-relaxed">{segText(s)}</span>
                       </span>
                     </>
@@ -290,6 +295,67 @@ export function CallDetailPage() {
         }}
       />
     </>
+  );
+}
+
+function roleMap(v: SpeakerRole[] | null | undefined): Map<string, string> {
+  const m = new Map<string, string>();
+  for (const r of Array.isArray(v) ? v : []) if (r.role !== "Unknown") m.set(r.speaker, r.role);
+  return m;
+}
+
+const SENTIMENT_TONE: Record<string, string> = {
+  positive: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200",
+  negative: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200",
+  mixed: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200",
+  neutral: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200",
+};
+
+/** AI summary, action items, sentiment and tags (same layout as the Android call screen). */
+function SummaryCard({ t }: { t: NonNullable<CallDetail["transcript"]> }) {
+  if (!t.summary) {
+    return t.summaryPending ? (
+      <p className="card p-4 text-sm text-slate-500" role="status">
+        AI summary in progress.
+      </p>
+    ) : null;
+  }
+  const items = Array.isArray(t.actionItems) ? t.actionItems : [];
+  const tags = Array.isArray(t.tags) ? t.tags : [];
+  return (
+    <section aria-labelledby="summary-h" className="card p-4">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h2 id="summary-h" className="font-semibold">
+          Summary
+        </h2>
+        {t.sentiment && (
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${SENTIMENT_TONE[t.sentiment] ?? SENTIMENT_TONE["neutral"]}`}>
+            Customer: {t.sentiment}
+          </span>
+        )}
+      </div>
+      <p className="text-sm leading-relaxed">{t.summary}</p>
+      {items.length > 0 && (
+        <>
+          <h3 className="mt-3 text-sm font-semibold">Action items</h3>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
+            {items.map((a, i) => (
+              <li key={i}>{a}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {tags.length > 0 && (
+        <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Tags">
+          {tags.map((tag) => (
+            <li key={tag} className="rounded-full border border-slate-300 px-2 py-0.5 text-xs dark:border-slate-700">
+              {tag}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-3 text-xs text-slate-500">Written by AI from the transcript; check before acting on it.</p>
+    </section>
   );
 }
 

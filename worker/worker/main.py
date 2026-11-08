@@ -107,6 +107,14 @@ class Api:
             return
         res.raise_for_status()
 
+    @_network_retry
+    def post_summary(self, job_id: str, payload: dict) -> None:
+        res = self.http.post(f"/internal/jobs/{job_id}/summary", json={"workerId": self.worker_id, **payload})
+        if res.status_code == 409:
+            log.warning("lost job lock; summary discarded", job_id=job_id)
+            return
+        res.raise_for_status()
+
     # ---- Compression ----
 
     @_network_retry
@@ -233,6 +241,11 @@ def run(settings: Settings) -> None:
         from .translator import Translator
 
         translator = Translator.start(api, settings, lambda: stopping)
+    summarizer = None
+    if settings.anthropic_api_key and settings.summarize_enabled:
+        from .summarizer import Summarizer
+
+        summarizer = Summarizer.start(api, settings, lambda: stopping)
 
     compressor = None
     if settings.compress_enabled:
@@ -273,6 +286,8 @@ def run(settings: Settings) -> None:
                 idle = min(idle * 2, settings.idle_max_sleep)
     if translator:
         translator.join()
+    if summarizer:
+        summarizer.join()
     if compressor:
         compressor.join()
 

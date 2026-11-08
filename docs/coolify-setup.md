@@ -86,6 +86,20 @@ Every new transcript also gets an English version, made by Claude Opus 5.5 on th
 4. A failed translation doesn't change the call: it stays `TRANSCRIBED` and shows the original transcript.
 5. **Monthly cap:** the Health page card "Translation spend this month" shows the Claude cost (from token usage, batch at half price). Admins set the cap there (default 500 USD). At the cap, translate jobs stay queued until next month or a higher cap; Cliq alerts at 80% and 100%. Jobs already handed out still finish, so spend can go over by up to one batch per running worker (the cap is checked when jobs are claimed, cost is recorded when they finish, including failed attempts). No env var needed.
 
+## AI call summaries (Milestone 5, off by default)
+Claude reads the English text and writes a summary, action items, the customer's sentiment, topic tags, and which speaker is the staff member (Agent) and which the Customer. Shown on the call page (dashboard and app). Uses the same Claude monthly cap as translation.
+
+1. On `uic-api`, `SUMMARIZE_ENABLED=true` (default `false`) queues a `summarize` job after each English translation (or after the transcript when `TRANSLATE_ENABLED=false`), with the call's priority: live calls now, backlog in Message Batches at half price.
+2. On `uic-worker`, `ANTHROPIC_API_KEY` must be set (same key as translation). Optional: `SUMMARY_MODEL` (default `claude-sonnet-5-5`), `SUMMARIZE_ENABLED=false` to keep this worker off summaries. Batching uses `TRANSLATE_BATCH_MAX` / `TRANSLATE_BATCH_WAIT_S`.
+3. Older calls: Health page → **Summarize existing calls** (admin), same as `POST /api/admin/summarize-backfill`.
+4. At the Claude cap, summarize jobs wait with translate jobs. A re-transcription clears the old summary.
+
+## Call list export (CSV)
+Calls page → **Export CSV** (managers and admins): the current filters, newest first, up to 10,000 calls, with summary, action items and transcripts (English and original). Every export is recorded in the audit log (`EXPORT`). No env var needed.
+
+## CI
+`.github/workflows/ci.yml` runs server tests, dashboard build, worker tests, the Android debug build and unit tests, `npm audit --omit=dev`, `pip-audit` and a gitleaks secret scan on every PR and push to `main`. It needs no repository secrets. `.github/dependabot.yml` also covers `server/dashboard` and GitHub Actions.
+
 ## Sarvam overflow (optional, off by default)
 A second worker can transcribe backlog calls that are waiting because the Fireflies monthly budget is used up. It never takes live calls or calls already sent to Fireflies. Run the eval (`worker/scripts/eval_transcripts.py`) and get spend approval first.
 

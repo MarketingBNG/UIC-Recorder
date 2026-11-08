@@ -46,7 +46,20 @@ export interface CallDetail extends Omit<CallItem, "transcript"> {
     textEn?: string | null;
     translationModel?: string | null;
     translationPending?: boolean;
+    /** AI summary (Milestone 5); absent on older servers, null until summarized. */
+    summary?: string | null;
+    actionItems?: string[] | null;
+    sentiment?: Sentiment | null;
+    tags?: string[] | null;
+    speakerRoles?: SpeakerRole[] | null;
+    summaryModel?: string | null;
+    summaryPending?: boolean;
   } | null;
+}
+export type Sentiment = "positive" | "neutral" | "negative" | "mixed";
+export interface SpeakerRole {
+  speaker: string;
+  role: "Agent" | "Customer" | "Unknown";
 }
 export interface CompressionStats {
   compressedCalls: number;
@@ -119,6 +132,8 @@ export interface TranslationAlert {
 }
 export interface TranslationUsage extends TranslationAlert {
   translatedThisMonth: number;
+  /** AI summaries this month (same Claude cap); absent on older servers. */
+  summarizedThisMonth?: number;
   avgCostUsd: number | null;
   queuedJobs: number;
   sarvamOverflow: boolean;
@@ -208,7 +223,8 @@ export type AuditAction =
   | "DEVICE_REVOKE"
   | "SETTINGS_CHANGE"
   | "CLIENT_LIST_CHANGE"
-  | "RETENTION_DELETE";
+  | "RETENTION_DELETE"
+  | "EXPORT";
 export interface AuditEntry {
   id: string;
   action: AuditAction | string;

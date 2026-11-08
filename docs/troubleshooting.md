@@ -2,6 +2,14 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Inline Python edit script failed in the Bash tool: "unexpected EOF while looking for matching quote" (M5, local dev)
+- **Cause:** a heredoc'd Python script containing TypeScript template literals (backticks) inside triple-quoted strings confused the shell wrapper.
+- **Fix:** wrote the edit script to a file in the scratchpad and ran `python <file>` instead.
+
+## gitleaks could not be run locally (M5, local dev)
+- **Cause:** Docker Desktop was not running, so the `zricethezav/gitleaks` image could not start.
+- **Fix:** none needed locally; the CI `secrets` job runs it. `.gitleaks.toml` allowlists test fixtures with fake tokens.
+
 ## Android unit test crashed with ExceptionInInitializerError (M4)
 - **Cause:** the test called a helper on `SetupChecks`, whose init reads `Build.MANUFACTURER` (null in JVM unit tests).
 - **Fix:** moved the pure rule (`needsRestrictedSettings`) to `DeviceHealth`, which has no Android state at init.

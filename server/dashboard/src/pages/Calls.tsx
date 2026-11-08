@@ -95,6 +95,12 @@ export function CallsPage() {
           <button type="button" className="btn-outline shrink-0" aria-expanded={showFilters} aria-controls="filters" onClick={() => setShowFilters((s) => !s)}>
             Filters{activeCount ? ` (${activeCount})` : ""}
           </button>
+          {manager && (
+            // Same filters as the list; the server caps the file at 10,000 calls and audit-logs the export.
+            <a className="btn-outline shrink-0" href={`/api/calls/export${qs(filters)}`} download>
+              Export CSV
+            </a>
+          )}
         </div>
         {showFilters && (
           <div id="filters" className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">

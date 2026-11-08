@@ -111,6 +111,7 @@ internal fun TranslationPanel(isAdmin: Boolean, state: TranslationPanelState, on
                     )
                     val avg = u.avgCostUsd?.let { " · avg $" + "%.4f".format(Locale.US, it) }.orEmpty()
                     Text("${u.translatedThisMonth} call(s) translated$avg", style = MaterialTheme.typography.bodySmall)
+                    u.summarizedThisMonth?.let { Text("$it call(s) summarized", style = MaterialTheme.typography.bodySmall) }
                     if (u.queuedJobs > 0) Text("${u.queuedJobs} waiting", style = MaterialTheme.typography.bodySmall)
                     Text("Sarvam overflow: ${if (u.sarvamOverflow) "On" else "Off"}", style = MaterialTheme.typography.bodySmall)
                     if (isAdmin) {

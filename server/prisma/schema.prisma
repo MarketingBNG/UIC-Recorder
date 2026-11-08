@@ -61,6 +61,8 @@ enum AuditAction {
   SETTINGS_CHANGE
   CLIENT_LIST_CHANGE
   RETENTION_DELETE
+  // Milestone 5: CSV export of the call list.
+  EXPORT
 }
 
 model User {
@@ -184,6 +186,17 @@ model Transcript {
   translationInputTokens  Int?    @map("translation_input_tokens")
   translationOutputTokens Int?    @map("translation_output_tokens")
   translationCostUsd      Float?  @map("translation_cost_usd")
+  // AI summary made by the worker's summarize job (Claude, reads the English text); null until summarized.
+  summary             String?
+  actionItems         Json?     @map("action_items") // string[]
+  sentiment           String? // positive | neutral | negative | mixed
+  tags                Json? // string[]
+  speakerRoles        Json?     @map("speaker_roles") // [{ speaker, role: Agent | Customer | Unknown }]
+  summaryModel        String?   @map("summary_model")
+  summaryInputTokens  Int?      @map("summary_input_tokens")
+  summaryOutputTokens Int?      @map("summary_output_tokens")
+  summaryCostUsd      Float?    @map("summary_cost_usd")
+  summarizedAt        DateTime? @map("summarized_at")
   // Generated column: to_tsvector('simple', text || ' ' || coalesce(text_en, '')). Created in migration SQL.
   tsv       Unsupported("tsvector")?
   createdAt DateTime                 @default(now()) @map("created_at")

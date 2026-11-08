@@ -254,6 +254,7 @@ internal val AUDIT_LABELS = linkedMapOf(
     "SETTINGS_CHANGE" to "Settings changed",
     "CLIENT_LIST_CHANGE" to "Client list changed",
     "RETENTION_DELETE" to "Retention deleted audio",
+    "EXPORT" to "Exported calls (CSV)",
 )
 
 internal fun auditLabel(action: String) = AUDIT_LABELS[action] ?: action
@@ -265,6 +266,7 @@ internal fun auditSummary(e: AuditEntry): String {
     fun int(k: String) = (d?.get(k) as? JsonPrimitive)?.intOrNull
     return when (e.action) {
         "SEARCH" -> str("q")?.let { "\"$it\"" } ?: ""
+        "EXPORT" -> "${int("rows") ?: 0} calls"
         "RETENTION_DELETE" -> "${int("deleted") ?: 0} audio files older than ${int("retentionMonths") ?: "?"} months"
         "CLIENT_LIST_CHANGE" -> d.orEmpty().mapNotNull { (k, v) ->
             (v as? JsonPrimitive)?.takeIf { !it.isString }?.intOrNull?.takeIf { it > 0 }?.let { "$k $it" }

@@ -1,0 +1,13 @@
+# gitleaks config for CI: the default rules, minus test fixtures that use fake tokens on purpose
+# (e.g. "w" * 40 worker tokens, locally generated JWT keys).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures and example env files"
+paths = [
+  '''^server/test/''',
+  '''^worker/tests/''',
+  '''^android/app/src/test/''',
+  '''(^|/)\.env\.example$''',
+]

@@ -142,7 +142,18 @@ data class Transcript(
     val textEn: String? = null,
     val translationModel: String? = null,
     val translationPending: Boolean = false,
+    /** AI summary (server Milestone 5); null until summarized or on older servers. */
+    val summary: String? = null,
+    val actionItems: List<String>? = null,
+    /** positive | neutral | negative | mixed */
+    val sentiment: String? = null,
+    val tags: List<String>? = null,
+    val speakerRoles: List<SpeakerRole>? = null,
+    val summaryPending: Boolean = false,
 )
+
+/** role is "Agent" (the staff member), "Customer" or "Unknown". */
+@Serializable data class SpeakerRole(val speaker: String, val role: String)
 
 @Serializable
 data class CallDetail(
@@ -279,6 +290,8 @@ data class TranslationUsage(
     val pct: Double = 0.0,
     val capped: Boolean = false,
     val translatedThisMonth: Int = 0,
+    /** AI summaries this month (same Claude cap); null on older servers. */
+    val summarizedThisMonth: Int? = null,
     val avgCostUsd: Double? = null,
     val queuedJobs: Int = 0,
     val sarvamOverflow: Boolean = false,
