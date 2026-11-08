@@ -11,8 +11,8 @@ class DeviceHealthTest {
 
     @Test fun countsOnlyLongCallsInsideTheWindow() {
         val since = 1_000L
-        val calls = listOf(call(2_000, 31), call(3_000, 30), call(500, 300), call(4_000, 120))
-        assertEquals(2, DeviceHealth.countLongCalls(calls, since))
+        val calls = listOf(call(2_000, 31), call(3_000, 30), call(3_500, 29), call(500, 300), call(4_000, 120))
+        assertEquals(3, DeviceHealth.countLongCalls(calls, since))
     }
 
     @Test fun bucketsAndFlags() {

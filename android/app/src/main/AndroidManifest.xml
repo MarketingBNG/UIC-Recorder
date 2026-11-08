@@ -14,6 +14,19 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Android 11+ package visibility: OEM autostart screens we resolve for the heartbeat. -->
+    <queries>
+        <package android:name="com.coloros.oppoguardelf" />
+        <package android:name="com.coloros.safecenter" />
+        <package android:name="com.huawei.systemmanager" />
+        <package android:name="com.iqoo.secure" />
+        <package android:name="com.miui.securitycenter" />
+        <package android:name="com.oppo.safe" />
+        <package android:name="com.samsung.android.lool" />
+        <package android:name="com.samsung.android.sm" />
+        <package android:name="com.vivo.permissionmanager" />
+    </queries>
+
     <application
         android:name=".UicApp"
         android:allowBackup="false"

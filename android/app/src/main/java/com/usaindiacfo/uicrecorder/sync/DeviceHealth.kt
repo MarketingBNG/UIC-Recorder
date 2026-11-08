@@ -32,7 +32,7 @@ object DeviceHealth {
     }
 
     fun countLongCalls(entries: List<CallLogEntry>, sinceMs: Long): Int =
-        entries.count { it.dateMs >= sinceMs && it.durationS > MIN_CALL_S }
+        entries.count { it.dateMs >= sinceMs && it.durationS >= MIN_CALL_S }
 
     fun bucketName(bucket: Int?): String? = when {
         bucket == null -> null

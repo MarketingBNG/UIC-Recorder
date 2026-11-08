@@ -88,10 +88,14 @@ class TokenStore(context: Context) : TokenProvider {
     private suspend fun load(): StoredTokens {
         app.tokenDataStore.data.first()[K_BLOB]?.let { blob -> codec.decode(blob)?.let { return it } }
         // Nothing stored yet (or the key was lost): migrate the old file once, else start fresh.
-        val fresh = migrateLegacy(app) ?: StoredTokens(installId = UUID.randomUUID().toString())
-        val blob = codec.encode(fresh)
-        app.tokenDataStore.edit { it[K_BLOB] = blob }
-        app.deleteSharedPreferences(LEGACY_FILE)
+        val legacyExists = File(app.applicationInfo.dataDir, "shared_prefs/$LEGACY_FILE.xml").exists()
+        val migrated = migrateLegacy(app)
+        val fresh = migrated ?: StoredTokens(installId = UUID.randomUUID().toString())
+        // A failed read of an existing old file (e.g. a transient Keystore error) keeps it for the next start.
+        if (migrated != null || !legacyExists) {
+            app.tokenDataStore.edit { it[K_BLOB] = codec.encode(fresh) }
+            app.deleteSharedPreferences(LEGACY_FILE)
+        }
         return fresh
     }
 

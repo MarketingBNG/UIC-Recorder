@@ -15,13 +15,14 @@ const Heartbeat = z.object({
   freeBytes: z.number().int().min(0).optional(),
   lastSyncAt: z.iso.datetime().optional(),
   // M4 (all optional so older apps keep working).
-  standbyBucket: z.number().int().min(0).max(1000).optional(),
-  lastStopReason: z.number().int().min(-512).max(1000).optional(),
-  calls7d: z.number().int().min(0).max(100_000).optional(),
-  recordings7d: z.number().int().min(0).max(100_000).optional(),
-  autostartIntent: z.string().max(200).optional(),
-  defaultDialer: z.string().max(200).optional(),
+  standbyBucket: z.number().int().min(0).max(1000).nullable().optional(),
+  lastStopReason: z.number().int().min(-512).max(1000).nullable().optional(),
+  calls7d: z.number().int().min(0).max(100_000).nullable().optional(),
+  recordings7d: z.number().int().min(0).max(100_000).nullable().optional(),
+  autostartIntent: z.string().max(200).nullable().optional(),
+  defaultDialer: z.string().max(200).nullable().optional(),
 });
+const M4_FIELDS = ["standbyBucket", "lastStopReason", "calls7d", "recordings7d", "autostartIntent", "defaultDialer"] as const;
 
 export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
   const auth = { preHandler: requireDevice(deps) };
@@ -47,6 +48,10 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
 
   app.post("/v1/device/heartbeat", auth, async (req, reply) => {
     const body = Heartbeat.parse(req.body);
+    // The app drops nulls from its JSON, so an M4 heartbeat that omits a field means "now unknown": clear it
+    // instead of keeping a stale value (and a stale alert). Older apps send none of these and keep them as-is.
+    const m4 = M4_FIELDS.some((k) => k in body);
+    const health = <T,>(v: T | null | undefined): T | null | undefined => (m4 ? v ?? null : undefined);
     await deps.db.device.update({
       where: { id: currentDevice(req).id },
       data: {
@@ -55,12 +60,12 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
         permissionsOk: body.permissionsOk,
         freeBytes: body.freeBytes !== undefined ? BigInt(body.freeBytes) : undefined,
         lastSyncAt: body.lastSyncAt ? new Date(body.lastSyncAt) : undefined,
-        standbyBucket: body.standbyBucket,
-        lastStopReason: body.lastStopReason,
-        calls7d: body.calls7d,
-        recordings7d: body.recordings7d,
-        autostartIntent: body.autostartIntent,
-        defaultDialer: body.defaultDialer,
+        standbyBucket: health(body.standbyBucket),
+        lastStopReason: health(body.lastStopReason),
+        calls7d: health(body.calls7d),
+        recordings7d: health(body.recordings7d),
+        autostartIntent: health(body.autostartIntent),
+        defaultDialer: health(body.defaultDialer),
         lastSeenAt: new Date(),
       },
     });

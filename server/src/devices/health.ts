@@ -16,15 +16,20 @@ export function bucketName(bucket: number | null | undefined): string | null {
   return "NEVER";
 }
 
+/** Health numbers older than this (no heartbeat since) are ignored by the flags and the alert. */
+export const HEALTH_FRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
 export interface HealthFields {
   standbyBucket: number | null;
   calls7d: number | null;
   recordings7d: number | null;
+  lastSeenAt?: Date | null;
 }
 
 /** RARE or worse: background uploads may be delayed by hours or days. */
 export const isThrottled = (d: HealthFields) => d.standbyBucket != null && d.standbyBucket >= BUCKET_RARE;
 
 /** The dialer is probably not recording (auto-record off, or a dialer whose files we can't read). */
-export const callsWithoutRecordings = (d: HealthFields) =>
+export const callsWithoutRecordings = (d: HealthFields, now = new Date()) =>
+  (d.lastSeenAt === undefined || (d.lastSeenAt != null && now.getTime() - d.lastSeenAt.getTime() <= HEALTH_FRESH_MS)) &&
   d.calls7d != null && d.calls7d > CALLS_NO_REC_MIN && d.recordings7d === 0;

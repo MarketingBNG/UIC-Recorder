@@ -72,5 +72,27 @@ describe("device health flags", () => {
     await t.db.device.updateMany({ where: { user: { email } }, data: { recordings7d: 3 } });
     const after = (await evaluateChecks(t.db, disk)).find((x) => x.key === "calls-no-recordings");
     expect(after?.text).not.toContain(email);
+
+    // A phone that stopped reporting no longer keeps the alert (or the badge) on with old numbers.
+    const old8d = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    await t.db.device.updateMany({ where: { user: { email } }, data: { recordings7d: 0, lastSeenAt: old8d } });
+    const stale = (await evaluateChecks(t.db, disk)).find((x) => x.key === "calls-no-recordings");
+    expect(stale?.text ?? "").not.toContain(email);
+    const list2 = await t.app.inject({ method: "GET", url: "/api/devices", headers: await t.sessionFor(admin) });
+    expect(list2.json().find((x: { user: { email: string } }) => x.user.email === email).callsWithoutRecordings).toBe(false);
+  });
+
+  it("an M4 heartbeat that omits a field clears the old value; an old-style heartbeat keeps it", async () => {
+    const email = uniqueEmail("hbnull");
+    const phone = await t.loginDevice(email);
+    const post = (payload: object) => t.app.inject({ method: "POST", url: "/v1/device/heartbeat", headers: phone.headers, payload });
+    await post({ pendingCount: 0, permissionsOk: true, standbyBucket: 40, calls7d: 12, recordings7d: 0, defaultDialer: "x.y" });
+    await post({ pendingCount: 0, permissionsOk: true });
+    let d = await t.db.device.findFirstOrThrow({ where: { user: { email } } });
+    expect(d.calls7d).toBe(12);
+    // Call-log permission revoked: the app sends M4 fields but drops the null call counts.
+    expect((await post({ pendingCount: 0, permissionsOk: false, standbyBucket: 10, defaultDialer: null })).statusCode).toBe(204);
+    d = await t.db.device.findFirstOrThrow({ where: { user: { email } } });
+    expect(d).toMatchObject({ standbyBucket: 10, calls7d: null, recordings7d: null, defaultDialer: null });
   });
 });
