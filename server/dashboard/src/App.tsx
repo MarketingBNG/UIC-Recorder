@@ -6,7 +6,10 @@ import { FirefliesBanner } from "./components/Fireflies";
 import { CallDetailPage } from "./pages/CallDetail";
 import { AuditPage } from "./pages/Audit";
 import { CallsPage } from "./pages/Calls";
+import { ContactDetailPage } from "./pages/ContactDetail";
+import { ContactsPage } from "./pages/Contacts";
 import { HealthPage } from "./pages/Health";
+import { RepsPage } from "./pages/Reps";
 import { SettingsPage } from "./pages/Settings";
 import { SignInPage } from "./pages/SignIn";
 import { UsersPage } from "./pages/Users";
@@ -50,7 +53,10 @@ export function App() {
 }
 
 function navItems(me: Me) {
-  const items = [{ to: "/calls", label: "Calls" }];
+  const items = [
+    { to: "/calls", label: "Calls" },
+    { to: "/activity", label: "Activity Tracker" },
+  ];
   if (isManager(me.role)) items.push({ to: "/health", label: "Sync health" }, { to: "/users", label: "Users" });
   if (me.role === "ADMIN") items.push({ to: "/settings", label: "Settings" }, { to: "/audit", label: "Audit log" });
   return items;
@@ -143,6 +149,9 @@ function Shell({ me }: { me: Me }) {
           <Route path="/" element={<Navigate to="/calls" replace />} />
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
+          <Route path="/activity" element={<ContactsPage />} />
+          <Route path="/activity/contacts/:id" element={<ContactDetailPage />} />
+          {isManager(me.role) && <Route path="/activity/reps" element={<RepsPage />} />}
           {isManager(me.role) && <Route path="/health" element={<HealthPage />} />}
           {isManager(me.role) && <Route path="/users" element={<UsersPage />} />}
           {me.role === "ADMIN" && <Route path="/settings" element={<SettingsPage />} />}

@@ -1,4 +1,4 @@
-import type { CallStatus, Direction } from "./api";
+import type { CallOutcome, CallStatus, ContactStatus, Direction } from "./api";
 
 // Times show in the viewer's own time zone (IST for the India team), like the Android app.
 const whenFmt = new Intl.DateTimeFormat(undefined, {
@@ -103,3 +103,45 @@ export function parseSegments(json: unknown): Segment[] {
 }
 
 export const personName = (u: { name: string | null; email: string }) => u.name || u.email;
+
+export const CONTACT_STATUS_LABEL: Record<ContactStatus, string> = {
+  NEW: "New",
+  INTERESTED: "Interested",
+  CALL_BACK: "Call back",
+  NOT_INTERESTED: "Not interested",
+  NO_ANSWER: "No answer",
+};
+export const OUTCOME_LABEL: Record<CallOutcome, string> = {
+  INTERESTED: "Interested",
+  CALL_BACK: "Call back",
+  NOT_INTERESTED: "Not interested",
+  NO_ANSWER: "No answer",
+};
+
+// Follow-up days are India calendar days (Asia/Kolkata, UTC+5:30, no DST), whatever the viewer's zone.
+const IST_OFFSET_MS = 330 * 60_000;
+/** yyyy-mm-dd of the IST calendar day containing `t`. */
+export const istDay = (t = Date.now()) => new Date(t + IST_OFFSET_MS).toISOString().slice(0, 10);
+/** ISO instant for the start (or end) of an IST yyyy-mm-dd day. */
+export function istDayBoundary(day: string, end: boolean) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return undefined;
+  const start = Date.parse(`${day}T00:00:00+05:30`);
+  if (Number.isNaN(start)) return undefined;
+  return new Date(end ? start + 86_400_000 - 1 : start).toISOString();
+}
+/** True when a follow-up falls before the start of today in IST. */
+export const isOverdue = (iso: string | null | undefined, now = Date.now()) =>
+  !!iso && new Date(iso).getTime() < Date.parse(`${istDay(now)}T00:00:00+05:30`);
+
+/** Value for <input type="datetime-local"> in the viewer's zone, and back to ISO. */
+export function toLocalInput(iso: string | null | undefined) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+export function fromLocalInput(v: string) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}

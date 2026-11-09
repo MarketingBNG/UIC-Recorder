@@ -24,6 +24,7 @@ object SyncScheduler {
     const val UPLOAD = "uic-upload-live"
     const val BACKLOG = "uic-backlog"
     const val SWEEP = "uic-sweep"
+    const val ACTIVITIES = "uic-activities"
 
     /** Call once from Application.onCreate. Cheap: only registers jobs that aren't already scheduled. */
     fun init(context: Context) {
@@ -83,6 +84,19 @@ object SyncScheduler {
         WorkManager.getInstance(context).enqueueUniqueWork(UPLOAD, ExistingWorkPolicy.KEEP, req)
     }
 
+    /**
+     * Sends queued dialer activities once online. APPEND_OR_REPLACE so a row queued while the worker is
+     * running still gets a run after it (KEEP would drop that enqueue).
+     */
+    fun enqueueActivities(context: Context) {
+        val req = OneTimeWorkRequestBuilder<ActivityWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .apply { if (Build.VERSION.SDK_INT >= 31) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(ACTIVITIES, ExistingWorkPolicy.APPEND_OR_REPLACE, req)
+    }
+
     /** Old recordings: only while charging, on unmetered network, battery not low. */
     fun enqueueBacklog(context: Context, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
         val constraints = Constraints.Builder()
@@ -102,6 +116,6 @@ object SyncScheduler {
     /** Optional on sign-out; workers no-op while signed out anyway and [init] re-arms at next start. */
     fun cancelSyncWork(context: Context) {
         val wm = WorkManager.getInstance(context)
-        listOf(SCAN_NOW, RECHECK, UPLOAD, BACKLOG).forEach(wm::cancelUniqueWork)
+        listOf(SCAN_NOW, RECHECK, UPLOAD, BACKLOG, ACTIVITIES).forEach(wm::cancelUniqueWork)
     }
 }

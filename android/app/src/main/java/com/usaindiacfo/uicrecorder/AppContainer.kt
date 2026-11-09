@@ -10,6 +10,8 @@ import com.usaindiacfo.uicrecorder.auth.TokenStore
 import com.usaindiacfo.uicrecorder.data.DeviceConfigRepository
 import com.usaindiacfo.uicrecorder.data.api.ApiClient
 import com.usaindiacfo.uicrecorder.data.db.AppDatabase
+import com.usaindiacfo.uicrecorder.dialer.ActivityRepository
+import com.usaindiacfo.uicrecorder.dialer.DialPrefs
 import com.usaindiacfo.uicrecorder.sync.SyncScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,7 +24,7 @@ class AppContainer(private val context: Context) {
     val tokenStore by lazy {
         TokenStore(context).apply {
             // Session ended server-side: drop cached call data and stop sync, as signOut() does.
-            onSessionEnded = { appScope.launch { SyncScheduler.cancelSyncWork(context); db.clearAllTables() } }
+            onSessionEnded = { appScope.launch { SyncScheduler.cancelSyncWork(context); db.clearAllTables(); DialPrefs(context).pending = null } }
         }
     }
     val apiClient by lazy { ApiClient(BuildConfig.API_URL, tokenStore) }
@@ -30,6 +32,7 @@ class AppContainer(private val context: Context) {
     val googleSignIn by lazy { GoogleSignIn(BuildConfig.GOOGLE_WEB_CLIENT_ID) }
     val authRepository by lazy { AuthRepository(context, apiClient, tokenStore, db, googleSignIn) }
     val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient, db.clientHashes()) }
+    val activityRepository by lazy { ActivityRepository(context, db.pendingActivities()) }
 
     /** Low-RAM phones (or < 3 GB): hash/compress/upload one file at a time. */
     val isLowRamDevice: Boolean by lazy {

@@ -2,6 +2,7 @@ import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { HttpError, type Deps } from "../context.js";
 import type { CallSource } from "../generated/prisma/client.js";
+import { linkCallToActivity } from "../activity/service.js";
 import { toE164 } from "../phone.js";
 import { UploadTooLargeError, mimeFromContentType } from "../storage/local.js";
 
@@ -58,6 +59,8 @@ export async function registerCall(
   const call = existing
     ? await deps.db.call.update({ where: { id: existing.id }, data })
     : await deps.db.call.create({ data: { ...data, userId, originalSha256: body.originalSha256 } });
+  // The rep may have logged the call's outcome in the dialer before the recording was found.
+  await linkCallToActivity(deps, call);
   return { callId: call.id, alreadyUploaded: false };
 }
 

@@ -414,3 +414,54 @@ data class AuditEntry(
 
 /** POST /api/admin/translate-backfill response. */
 @Serializable data class TranslateBackfill(val queued: Int = 0)
+
+// ---- Activity tracker (dialer): /v1/activities, /v1/contacts -------------------
+
+@Serializable enum class ContactStatus { NEW, INTERESTED, CALL_BACK, NOT_INTERESTED, NO_ANSWER }
+@Serializable enum class ActivityType { CALL, WHATSAPP, NOTE }
+@Serializable enum class CallOutcome { INTERESTED, CALL_BACK, NOT_INTERESTED, NO_ANSWER }
+
+@Serializable
+data class ContactDto(
+    val id: String,
+    val phoneE164: String,
+    val name: String? = null,
+    val company: String? = null,
+    val status: ContactStatus = ContactStatus.NEW,
+    val nextFollowUpAt: String? = null,
+    val lastActivityAt: String? = null,
+    val owner: UserRef? = null,
+)
+
+@Serializable
+data class ActivityDto(
+    val id: String,
+    val clientId: String,
+    val type: ActivityType,
+    val outcome: CallOutcome? = null,
+    val note: String? = null,
+    val followUpAt: String? = null,
+    val durationS: Int? = null,
+    val occurredAt: String,
+    val callId: String? = null,
+)
+
+/** POST /v1/activities. Idempotent by [clientId] (a UUID made on the phone). Null fields are not sent. */
+@Serializable
+data class CreateActivityRequest(
+    val clientId: String,
+    val phone: String,
+    val type: ActivityType,
+    val outcome: CallOutcome? = null,
+    val note: String? = null,
+    val followUpAt: String? = null,
+    val durationS: Int? = null,
+    val occurredAt: String,
+    val name: String? = null,
+    val company: String? = null,
+)
+
+@Serializable data class CreateActivityResponse(val activity: ActivityDto, val contact: ContactDto)
+@Serializable data class ContactPage(val items: List<ContactDto> = emptyList(), val nextCursor: String? = null)
+@Serializable data class ContactList(val items: List<ContactDto> = emptyList())
+@Serializable data class ContactByPhone(val contact: ContactDto? = null, val activities: List<ActivityDto> = emptyList())

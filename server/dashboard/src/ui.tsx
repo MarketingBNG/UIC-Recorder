@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import type { CallStatus, Direction } from "./api";
-import { DIRECTION_LABEL, STATUS_LABEL } from "./format";
+import type { CallStatus, ContactStatus, Direction } from "./api";
+import { CONTACT_STATUS_LABEL, DIRECTION_LABEL, STATUS_LABEL } from "./format";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
@@ -174,3 +174,12 @@ export function Toggle({ checked, onChange, label, hint }: { checked: boolean; o
     </label>
   );
 }
+
+const CONTACT_TONE: Record<ContactStatus, Tone> = {
+  NEW: "gray",
+  INTERESTED: "green",
+  CALL_BACK: "blue",
+  NOT_INTERESTED: "red",
+  NO_ANSWER: "amber",
+};
+export const ContactStatusBadge = ({ status }: { status: ContactStatus }) => <Badge tone={CONTACT_TONE[status]}>{CONTACT_STATUS_LABEL[status]}</Badge>;

@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ZodError } from "zod";
 import { HttpError, type Deps } from "./context.js";
+import { activityRoutes } from "./routes/activity.js";
 import { authRoutes } from "./routes/auth.js";
 import { callRoutes } from "./routes/calls.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
@@ -63,6 +64,7 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => importRoutes(s, deps));
   await app.register(async (s) => dashboardRoutes(s, deps));
   await app.register(async (s) => firefliesRoutes(s, deps));
+  await app.register(async (s) => activityRoutes(s, deps));
 
   // Built dashboard (React SPA), served from the same origin.
   // Built: dist/src/app.js -> dist/public. Dev (tsx src/app.ts): falls back to dist/public too.

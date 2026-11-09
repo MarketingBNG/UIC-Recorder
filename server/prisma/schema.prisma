@@ -83,6 +83,9 @@ model User {
   calls    Call[]
   auditLog AuditLog[]
 
+  ownedContacts Contact[]  @relation("ContactOwner")
+  activities    Activity[]
+
   @@map("users")
 }
 
@@ -165,6 +168,7 @@ model Call {
   jobs       Job[]
 
   firefliesReservations FirefliesReservation[]
+  activities            Activity[]
 
   @@unique([userId, originalSha256])
   @@index([userId, startedAt(sort: Desc)])
@@ -328,4 +332,74 @@ model ClientNumber {
   createdAt DateTime @default(now()) @map("created_at")
 
   @@map("client_numbers")
+}
+
+// Activity tracker (docs/dialer-plan.md). A contact is created the first time a number gets an activity;
+// its owner is the rep who logged that first activity. Calls belong to a contact by phone_e164 (no FK).
+enum ContactStatus {
+  NEW
+  INTERESTED
+  CALL_BACK
+  NOT_INTERESTED
+  NO_ANSWER
+}
+
+enum ActivityType {
+  CALL
+  WHATSAPP
+  NOTE
+}
+
+enum CallOutcome {
+  INTERESTED
+  CALL_BACK
+  NOT_INTERESTED
+  NO_ANSWER
+}
+
+model Contact {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  phoneE164      String        @unique @map("phone_e164")
+  name           String?
+  company        String?
+  ownerId        String?       @map("owner_id") @db.Uuid
+  status         ContactStatus @default(NEW)
+  nextFollowUpAt DateTime?     @map("next_follow_up_at")
+  lastActivityAt DateTime?     @map("last_activity_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  owner      User?      @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  activities Activity[]
+
+  @@index([ownerId])
+  @@index([nextFollowUpAt])
+  @@index([lastActivityAt(sort: Desc)])
+  @@map("contacts")
+}
+
+model Activity {
+  id         String       @id @default(uuid(7)) @db.Uuid
+  // UUID made on the phone so retried POSTs are idempotent; dashboard rows use a server UUID.
+  clientId   String       @unique @map("client_id")
+  contactId  String       @map("contact_id") @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  type       ActivityType
+  outcome    CallOutcome?
+  note       String?
+  followUpAt DateTime?    @map("follow_up_at")
+  durationS  Int?         @map("duration_s")
+  occurredAt DateTime     @map("occurred_at")
+  // The rep's recorded Call with the same number within 10 minutes, linked from either side.
+  callId     String?      @map("call_id") @db.Uuid
+  createdAt  DateTime     @default(now()) @map("created_at")
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  call    Call?   @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  @@index([contactId, occurredAt(sort: Desc)])
+  @@index([userId, occurredAt(sort: Desc)])
+  @@index([callId])
+  @@map("activities")
 }

@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
@@ -41,6 +42,9 @@ import com.usaindiacfo.uicrecorder.ui.calls.CallDetailScreen
 import com.usaindiacfo.uicrecorder.ui.admin.AuditScreen
 import com.usaindiacfo.uicrecorder.ui.admin.ClientListScreen
 import com.usaindiacfo.uicrecorder.ui.calls.CallsScreen
+import com.usaindiacfo.uicrecorder.ui.dialer.ContactDetailScreen
+import com.usaindiacfo.uicrecorder.ui.dialer.DialerScreen
+import com.usaindiacfo.uicrecorder.ui.dialer.PendingDialHost
 import com.usaindiacfo.uicrecorder.ui.home.HomeScreen
 import com.usaindiacfo.uicrecorder.ui.settings.SettingsScreen
 import com.usaindiacfo.uicrecorder.ui.setup.SetupScreen
@@ -50,6 +54,8 @@ object Routes {
     const val SIGN_IN = "signIn"
     const val SETUP = "setup"
     const val HOME = "home"
+    const val DIALER = "dialer"
+    const val CONTACT = "contact/{phone}"
     const val CALLS = "calls"
     const val CALL_DETAIL = "callDetail/{id}"
     const val ADMIN_USERS = "admin/users"
@@ -60,6 +66,7 @@ object Routes {
     const val SETTINGS = "settings"
 
     fun callDetail(id: String) = "callDetail/$id"
+    fun contact(phone: String) = "contact/${android.net.Uri.encode(phone)}"
 }
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -82,6 +89,7 @@ fun AppNavigation(container: AppContainer, nav: NavHostController = rememberNavC
 
     val tabs = buildList {
         add(Tab(Routes.HOME, "Home", Icons.Filled.Home))
+        add(Tab(Routes.DIALER, "Dialer", Icons.Filled.Phone))
         add(Tab(Routes.CALLS, "Calls", Icons.Filled.Call))
         if (user?.canManage == true) add(Tab(Routes.ADMIN_USERS, "Admin", Icons.Filled.Person))
         add(Tab(Routes.SETTINGS, "Settings", Icons.Filled.Settings))
@@ -93,7 +101,8 @@ fun AppNavigation(container: AppContainer, nav: NavHostController = rememberNavC
             if (showBar) NavigationBar {
                 tabs.forEach { tab ->
                     val selected = route == tab.route || (tab.route == Routes.ADMIN_USERS && route in ADMIN_ROUTES) ||
-                        (tab.route == Routes.CALLS && route == Routes.CALL_DETAIL)
+                        (tab.route == Routes.CALLS && route == Routes.CALL_DETAIL) ||
+                        (tab.route == Routes.DIALER && route == Routes.CONTACT)
                     NavigationBarItem(
                         selected = selected,
                         onClick = { nav.navigateTab(tab.route) },
@@ -120,6 +129,10 @@ fun AppNavigation(container: AppContainer, nav: NavHostController = rememberNavC
                 })
             }
             composable(Routes.HOME) { HomeScreen(onOpenSetup = { nav.navigate(Routes.SETUP) }) }
+            composable(Routes.DIALER) { DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
+            composable(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
+                ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })
+            }
             composable(Routes.CALLS) { CallsScreen(onOpenCall = { nav.navigate(Routes.callDetail(it)) }) }
             composable(Routes.CALL_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                 CallDetailScreen(id = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
@@ -133,6 +146,8 @@ fun AppNavigation(container: AppContainer, nav: NavHostController = rememberNavC
             }
             composable(Routes.SETTINGS) { SettingsScreen(onOpenSetup = { nav.navigate(Routes.SETUP) }) }
         }
+        // Outcome prompt after a call started from the app; shown over whichever screen the rep returns to.
+        if (user != null) PendingDialHost()
     }
 }
 

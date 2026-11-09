@@ -7,6 +7,7 @@ import com.usaindiacfo.uicrecorder.data.api.ApiClient
 import com.usaindiacfo.uicrecorder.data.api.DeviceInfo
 import com.usaindiacfo.uicrecorder.data.api.UserDto
 import com.usaindiacfo.uicrecorder.data.db.AppDatabase
+import com.usaindiacfo.uicrecorder.dialer.DialPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.StateFlow
@@ -53,6 +54,7 @@ class AuthRepository(
         tokens.refreshToken?.let { runCatching { api.logout(it) } }
         tokens.clear()
         db.clearAllTables()
+        DialPrefs(appContext).pending = null // a dial from this session must not be logged as the next rep
         google.clear(appContext)
     }
 }

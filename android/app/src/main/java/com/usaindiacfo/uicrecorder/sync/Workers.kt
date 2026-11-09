@@ -7,6 +7,7 @@ import androidx.work.WorkerParameters
 import com.usaindiacfo.uicrecorder.container
 import com.usaindiacfo.uicrecorder.data.api.ApiException
 import com.usaindiacfo.uicrecorder.data.db.RecordingSource
+import com.usaindiacfo.uicrecorder.data.db.toRequest
 import java.io.IOException
 
 private val Context.signedIn get() = container.tokenStore.user.value != null
@@ -89,5 +90,39 @@ class SweepWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
         if (cfg.backlogEnabled) SyncScheduler.enqueueBacklog(ctx)
         HeartbeatReporter.report(ctx, force = true)
         return Result.success()
+    }
+}
+
+/** Sends queued dialer activities (outcomes, WhatsApp, notes). Idempotent by clientId, so retries are safe. */
+class ActivityWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        val ctx = applicationContext
+        if (!ctx.signedIn) return Result.success()
+        val c = ctx.container
+        val dao = c.db.pendingActivities()
+        while (!isStopped) {
+            val batch = dao.nextBatch()
+            if (batch.isEmpty()) return Result.success()
+            for (row in batch) {
+                if (isStopped) break
+                try {
+                    c.apiClient.postActivity(row.toRequest())
+                    dao.delete(row.clientId)
+                } catch (e: ApiException) {
+                    when {
+                        e.isAuth -> return Result.success() // signed out; nothing to send as
+                        // Bad phone number or missing follow-up date: retrying never helps, so park the row. Other 4xx (404/405 while
+                        // the server is mid-deploy or older than the app) are retried rather than dropped.
+                        e.code == 400 || e.code == 422 -> dao.markFailed(row.clientId, e.message ?: "HTTP ${e.code}")
+                        else -> { dao.bumpAttempts(row.clientId); return Result.retry() }
+                    }
+                } catch (_: IOException) {
+                    dao.bumpAttempts(row.clientId)
+                    return Result.retry()
+                }
+            }
+        }
+        recordStop(ctx)
+        return Result.retry()
     }
 }

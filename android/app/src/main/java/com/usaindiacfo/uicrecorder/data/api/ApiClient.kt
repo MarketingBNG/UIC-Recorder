@@ -148,6 +148,30 @@ class ApiClient(
         }
     }
 
+    // ---- Activity tracker (dialer) ----------------------------------------
+
+    suspend fun postActivity(req: CreateActivityRequest): CreateActivityResponse = post("/v1/activities", req)
+
+    /** Contacts the rep owns or has any activity on; [q] matches name, company or phone. */
+    suspend fun contacts(q: String? = null, cursor: String? = null, limit: Int = 50): ContactPage =
+        get("/v1/contacts", mapOf("q" to q?.takeIf { it.isNotBlank() }, "cursor" to cursor, "limit" to limit.toString()))
+
+    /** Follow-ups due by the end of today (IST), oldest first. */
+    suspend fun followups(): ContactList = get("/v1/contacts/followups")
+
+    suspend fun contactByPhone(phone: String): ContactByPhone = get("/v1/contacts/by-phone", mapOf("phone" to phone))
+
+    /** Sends both fields; null clears a field (blank text is sent as null). */
+    suspend fun patchContact(id: String, name: String?, company: String?): ContactDto {
+        val body = JsonObject(
+            mapOf(
+                "name" to (name?.trim()?.takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) } ?: JsonNull),
+                "company" to (company?.trim()?.takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) } ?: JsonNull),
+            ),
+        )
+        return json.decodeFromString(send(jsonRequest("/v1/contacts/$id", "PATCH", body.toString())))
+    }
+
     // ---- Dashboard API ----------------------------------------------------
 
     suspend fun me(): Me = get("/api/me")

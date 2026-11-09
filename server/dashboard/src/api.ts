@@ -299,3 +299,74 @@ export function qs(params: Record<string, string | number | undefined | null>) {
 }
 
 export const isManager = (r?: Role) => r === "ADMIN" || r === "MANAGER";
+
+// Activity tracker (dialer plan): contacts are keyed by phone number and owned by the
+// rep who first logged an activity for them.
+export type ContactStatus = "NEW" | "INTERESTED" | "CALL_BACK" | "NOT_INTERESTED" | "NO_ANSWER";
+export type ActivityType = "CALL" | "WHATSAPP" | "NOTE";
+export type CallOutcome = "INTERESTED" | "CALL_BACK" | "NOT_INTERESTED" | "NO_ANSWER";
+export interface Contact {
+  id: string;
+  phoneE164: string;
+  name: string | null;
+  company: string | null;
+  status: ContactStatus;
+  nextFollowUpAt: string | null;
+  lastActivityAt: string | null;
+  owner: UserRef | null;
+}
+export interface ContactListItem extends Contact {
+  activityCount: number;
+}
+export interface ContactPage {
+  items: ContactListItem[];
+  nextCursor: string | null;
+}
+export interface Activity {
+  id: string;
+  clientId: string;
+  type: ActivityType;
+  outcome: CallOutcome | null;
+  note: string | null;
+  followUpAt: string | null;
+  durationS: number | null;
+  occurredAt: string;
+  callId: string | null;
+}
+export type TimelineItem =
+  | (Activity & {
+      kind: "activity";
+      user: UserRef;
+      call?: { id: string; status: CallStatus; summary: string | null; hasAudio: boolean } | null;
+    })
+  | {
+      kind: "call";
+      id: string;
+      direction: Direction;
+      startedAt: string;
+      durationS: number | null;
+      status: CallStatus;
+      user: UserRef;
+      hasAudio: boolean;
+      summary: string | null;
+    };
+export interface ContactDetail {
+  contact: Contact;
+  timeline: TimelineItem[];
+}
+export interface ContactPatch {
+  name?: string | null;
+  company?: string | null;
+  status?: ContactStatus;
+  nextFollowUpAt?: string | null;
+  ownerId?: string;
+}
+export interface RepStats {
+  user: UserRef;
+  callsMade: number;
+  answered: number;
+  talkTimeS: number;
+  whatsapp: number;
+  followUpsDueToday: number;
+  overdue: number;
+}
