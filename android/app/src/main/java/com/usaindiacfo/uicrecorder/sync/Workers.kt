@@ -26,6 +26,7 @@ class NewRecordingWorker(ctx: Context, params: WorkerParameters) : CoroutineWork
         if (!inputData.getBoolean(KEY_ONE_SHOT, false)) SyncScheduler.enqueueTrigger(ctx, ExistingWorkPolicy.APPEND_OR_REPLACE)
         if (!ctx.signedIn) return Result.success()
         val c = ctx.container
+        if (inputData.getBoolean(KEY_RESET_FAILED, false)) c.db.recordings().resetFailed()
         val cfg = c.deviceConfigRepository.refreshIfStale()
         val scan = runCatching { SyncEngine(ctx, c).scan(cfg, System.currentTimeMillis() - 2 * DAY_MS) }.getOrNull()
         if (scan?.deferred == true) SyncScheduler.scheduleRecheck(ctx)
@@ -33,7 +34,10 @@ class NewRecordingWorker(ctx: Context, params: WorkerParameters) : CoroutineWork
         return Result.success()
     }
 
-    companion object { const val KEY_ONE_SHOT = "one_shot" }
+    companion object {
+        const val KEY_ONE_SHOT = "one_shot"
+        const val KEY_RESET_FAILED = "reset_failed"
+    }
 }
 
 /** Uploads LIVE recordings. Network constraint and backoff come from [SyncScheduler.enqueueUpload]. */
@@ -113,7 +117,8 @@ class ActivityWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                         e.isAuth -> return Result.success() // signed out; nothing to send as
                         // Bad phone number or missing follow-up date: retrying never helps, so park the row. Other 4xx (404/405 while
                         // the server is mid-deploy or older than the app) are retried rather than dropped.
-                        e.code == 400 || e.code == 422 -> dao.markFailed(row.clientId, e.message ?: "HTTP ${e.code}")
+                        // Only trust a 400/422 that our server itself sent; a proxy page is retried like any outage.
+                        (e.code == 400 || e.code == 422) && e.fromServer -> dao.markFailed(row.clientId, e.message ?: "HTTP ${e.code}")
                         else -> { dao.bumpAttempts(row.clientId); return Result.retry() }
                     }
                 } catch (_: IOException) {
@@ -124,5 +129,25 @@ class ActivityWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         }
         recordStop(ctx)
         return Result.retry()
+    }
+}
+
+/**
+ * Hourly, when online: restart queued uploads and outcomes that are sitting in WorkManager backoff. Backoff
+ * doubles up to 5 h, so without this a long server outage could delay recovery by hours after it is back.
+ */
+class ResumeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        val ctx = applicationContext
+        if (!ctx.signedIn) return Result.success()
+        val c = ctx.container
+        if (c.db.recordings().nextPending(RecordingSource.LIVE, 1).isNotEmpty()) {
+            val cfg = c.deviceConfigRepository.current()
+            SyncScheduler.restartIfWaiting(ctx, SyncScheduler.UPLOAD) { SyncScheduler.enqueueUpload(ctx, cfg, it) }
+        }
+        if (c.db.pendingActivities().pendingCount() > 0) {
+            SyncScheduler.restartIfWaiting(ctx, SyncScheduler.ACTIVITIES) { SyncScheduler.enqueueActivities(ctx, it) }
+        }
+        return Result.success()
     }
 }

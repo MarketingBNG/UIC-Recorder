@@ -11,6 +11,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.usaindiacfo.uicrecorder.data.api.DeviceConfig
@@ -25,6 +26,7 @@ object SyncScheduler {
     const val BACKLOG = "uic-backlog"
     const val SWEEP = "uic-sweep"
     const val ACTIVITIES = "uic-activities"
+    const val RESUME = "uic-resume"
 
     /** Call once from Application.onCreate. Cheap: only registers jobs that aren't already scheduled. */
     fun init(context: Context) {
@@ -36,6 +38,25 @@ object SyncScheduler {
                 .build(),
         )
         enqueueBacklog(context)
+        WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            RESUME, ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<ResumeWorker>(1, TimeUnit.HOURS)
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build(),
+        )
+    }
+
+    /**
+     * Re-enqueues [name] with REPLACE when it is only waiting (backoff or constraints), so it runs now; leaves a
+     * running job alone. When there is no job at all, enqueues normally via [enqueue].
+     */
+    fun restartIfWaiting(context: Context, name: String, enqueue: (ExistingWorkPolicy) -> Unit) {
+        val infos = WorkManager.getInstance(context).getWorkInfosForUniqueWork(name).get()
+        when {
+            infos.any { it.state == WorkInfo.State.RUNNING } -> Unit
+            infos.any { it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.BLOCKED } -> enqueue(ExistingWorkPolicy.REPLACE)
+            else -> enqueue(ExistingWorkPolicy.KEEP)
+        }
     }
 
     /** One-shot content-URI trigger on MediaStore audio; [NewRecordingWorker] re-arms it each run. */
@@ -56,7 +77,7 @@ object SyncScheduler {
         WorkManager.getInstance(context).enqueueUniqueWork(
             SCAN_NOW, ExistingWorkPolicy.REPLACE,
             OneTimeWorkRequestBuilder<NewRecordingWorker>()
-                .setInputData(workDataOf(NewRecordingWorker.KEY_ONE_SHOT to true))
+                .setInputData(workDataOf(NewRecordingWorker.KEY_ONE_SHOT to true, NewRecordingWorker.KEY_RESET_FAILED to true))
                 .build(),
         )
         enqueueBacklog(context)
@@ -74,27 +95,27 @@ object SyncScheduler {
     }
 
     /** Uploads LIVE files on the network the server allows. Expedited only on Android 12+ (below it would need a foreground service). */
-    fun enqueueUpload(context: Context, cfg: DeviceConfig) {
+    fun enqueueUpload(context: Context, cfg: DeviceConfig, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
         val network = if (cfg.liveNetwork.equals("wifi", ignoreCase = true)) NetworkType.UNMETERED else NetworkType.CONNECTED
         val req = OneTimeWorkRequestBuilder<UploadWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(network).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .apply { if (Build.VERSION.SDK_INT >= 31) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(UPLOAD, ExistingWorkPolicy.KEEP, req)
+        WorkManager.getInstance(context).enqueueUniqueWork(UPLOAD, policy, req)
     }
 
     /**
      * Sends queued dialer activities once online. APPEND_OR_REPLACE so a row queued while the worker is
      * running still gets a run after it (KEEP would drop that enqueue).
      */
-    fun enqueueActivities(context: Context) {
+    fun enqueueActivities(context: Context, policy: ExistingWorkPolicy = ExistingWorkPolicy.APPEND_OR_REPLACE) {
         val req = OneTimeWorkRequestBuilder<ActivityWorker>()
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .apply { if (Build.VERSION.SDK_INT >= 31) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST) }
             .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(ACTIVITIES, ExistingWorkPolicy.APPEND_OR_REPLACE, req)
+        WorkManager.getInstance(context).enqueueUniqueWork(ACTIVITIES, policy, req)
     }
 
     /** Old recordings: only while charging, on unmetered network, battery not low. */

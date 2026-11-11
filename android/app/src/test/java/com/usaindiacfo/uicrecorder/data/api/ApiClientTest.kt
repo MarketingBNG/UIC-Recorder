@@ -72,6 +72,42 @@ class ApiClientTest {
         assertEquals(true, tokens.failed)
     }
 
+    private fun html(code: Int) =
+        MockResponse.Builder().code(code).addHeader("content-type", "text/html").body("<html>proxy error</html>").build()
+
+    /** Server down / redeploying: the proxy's error page on /v1/auth/refresh must not end the session. */
+    @Test fun keepsSessionWhenProxyAnswersRefresh() = runBlocking {
+        for (code in listOf(404, 403, 400, 502, 503)) {
+            server.enqueue(json(401, """{"error":"Invalid or expired token"}"""))
+            server.enqueue(html(code))
+            try { api.me(); fail("expected ApiException") } catch (_: ApiException) {}
+            assertEquals("code $code", false, tokens.failed)
+            assertEquals("refresh-old", tokens.refreshToken)
+        }
+    }
+
+    @Test fun keepsSessionWhenRefreshIsHtml401() = runBlocking {
+        server.enqueue(json(401, """{"error":"Invalid or expired token"}"""))
+        server.enqueue(html(401))
+        try { api.me(); fail("expected ApiException") } catch (_: ApiException) {}
+        assertEquals(false, tokens.failed)
+    }
+
+    @Test fun proxyErrorsAreTransientServerErrorsAreNot() = runBlocking {
+        server.enqueue(html(404))
+        val proxy = runCatching { api.me() }.exceptionOrNull() as ApiException
+        assertEquals(false, proxy.fromServer)
+        assertEquals(true, proxy.isTransient)
+
+        server.enqueue(json(400, """{"error":"Bad phone number"}"""))
+        val bad = runCatching { api.me() }.exceptionOrNull() as ApiException
+        assertEquals(true, bad.fromServer)
+        assertEquals(false, bad.isTransient)
+
+        server.enqueue(json(503, """{"error":"Busy"}"""))
+        assertEquals(true, (runCatching { api.me() }.exceptionOrNull() as ApiException).isTransient)
+    }
+
     @Test fun firefliesPatchSendsOnlySetFields() = runBlocking {
         server.enqueue(
             json(200, """{"month":"2026-11","enabled":true,"budgetMinutes":16200,"liveReservePct":10,"usedMinutes":0,

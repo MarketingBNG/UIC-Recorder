@@ -68,7 +68,7 @@ class ContactDetailViewModel(private val c: AppContainer, val phone: String) : V
             val r = c.apiClient.contactByPhone(phone)
             _state.update { it.copy(loading = false, contact = r.contact, activities = r.activities, error = null) }
         } catch (e: IOException) {
-            _state.update { it.copy(loading = false, error = e.message ?: "Can't reach the server") }
+            _state.update { it.copy(loading = false, error = friendlyError(e)) }
         }
     }
 

@@ -64,3 +64,11 @@ fun pickFollowUp(context: Context, initialMs: Long?, onPicked: (Long) -> Unit) {
         datePicker.minDate = System.currentTimeMillis() - 1000
     }.show()
 }
+
+/**
+ * What a rep sees when a list can't load. Network and server trouble get one plain sentence (not
+ * "Failed to connect to …"); only a real error message from our server is shown as-is.
+ */
+fun friendlyError(e: java.io.IOException): String =
+    if (e is com.usaindiacfo.uicrecorder.data.api.ApiException && e.fromServer && !e.isTransient) e.message ?: "Something went wrong"
+    else "Can't reach the server right now. You can still call; outcomes are saved on the phone and sent when it's back."

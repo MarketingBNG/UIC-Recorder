@@ -33,9 +33,16 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /** Non-2xx response. [code] is the HTTP status, message is the server's `error` text. */
-class ApiException(val code: Int, message: String) : IOException(message) {
+/**
+ * A non-2xx reply. [fromServer] is true when the body is our server's JSON error; false means something in
+ * between answered (a proxy's HTML 404/502 page while the server is down or mid-deploy).
+ */
+class ApiException(val code: Int, message: String, val fromServer: Boolean = false) : IOException(message) {
     val isAuth get() = code == 401
     val isForbidden get() = code == 403
+
+    /** Worth retrying later rather than giving up on the item: server/proxy trouble, not a bad request. */
+    val isTransient get() = code >= 500 || code == 408 || code == 429 || !fromServer
 }
 
 /** What the HTTP layer needs from token storage (implemented by TokenStore; fakes in tests). */
@@ -300,7 +307,7 @@ class ApiClient(
 
     private fun Response.toApiException(): ApiException {
         val msg = runCatching { json.decodeFromString<ErrorBody>(body.string()).error }.getOrNull()
-        return ApiException(code, msg ?: message.ifBlank { "HTTP $code" })
+        return ApiException(code, msg ?: message.ifBlank { "HTTP $code" }, fromServer = msg != null)
     }
 
     private inner class BearerInterceptor : Interceptor {
@@ -335,8 +342,11 @@ class ApiClient(
             .build()
         val res = try { refreshClient.newCall(req).execute() } catch (_: IOException) { return null }
         res.use {
-            if (it.code in 400..499 && it.code != 429) {
-                tokens.onRefreshFailed()
+            // Only our server's own "refresh token invalid" (401 + JSON error) ends the session. A proxy's 404/403
+            // page while the server is down or redeploying must not sign the rep out (that wipes local state).
+            if (it.code == 401) {
+                val fromServer = runCatching { json.decodeFromString<ErrorBody>(it.body.string()) }.isSuccess
+                if (fromServer) tokens.onRefreshFailed()
                 return null
             }
             if (!it.isSuccessful) return null

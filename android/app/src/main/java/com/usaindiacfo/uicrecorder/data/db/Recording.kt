@@ -98,6 +98,10 @@ interface RecordingDao {
     @Query("UPDATE recordings SET status = 'FAILED', attempts = attempts + 1, lastError = :error, updatedAt = :now WHERE id = :id")
     suspend fun markFailed(id: Long, error: String?, now: Long = System.currentTimeMillis())
 
+    /** "Sync now": give files that ran out of attempts (e.g. during an older app's outage handling) a fresh start. */
+    @Query("UPDATE recordings SET status = 'PENDING', attempts = 0, updatedAt = :now WHERE status = 'FAILED'")
+    suspend fun resetFailed(now: Long = System.currentTimeMillis()): Int
+
     /** Crash/kill recovery: anything left UPLOADING goes back to PENDING. */
     @Query("UPDATE recordings SET status = 'PENDING' WHERE status = 'UPLOADING'")
     suspend fun resetStuckUploads(): Int

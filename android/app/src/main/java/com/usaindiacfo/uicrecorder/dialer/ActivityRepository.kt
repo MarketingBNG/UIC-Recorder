@@ -10,7 +10,11 @@ import java.time.Instant
 import java.util.UUID
 
 /** Offline-safe logging: every activity goes to Room first, then ActivityWorker sends it. */
-class ActivityRepository(private val context: Context, private val dao: PendingActivityDao) {
+class ActivityRepository(
+    private val context: Context,
+    private val dao: PendingActivityDao,
+    private val currentUserId: () -> String?,
+) {
     val pendingCount = dao.observePendingCount()
 
     suspend fun log(
@@ -39,6 +43,11 @@ class ActivityRepository(private val context: Context, private val dao: PendingA
                 company = company?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
             ),
         )
+        // Remember whose queue this is, so a different rep signing in later never sends it under their name.
+        currentUserId()?.let {
+            context.getSharedPreferences("activity_queue", Context.MODE_PRIVATE).edit()
+                .putString(com.usaindiacfo.uicrecorder.auth.AuthRepository.KEY_QUEUE_OWNER, it).apply()
+        }
         SyncScheduler.enqueueActivities(context)
     }
 }

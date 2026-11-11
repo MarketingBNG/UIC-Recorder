@@ -36,8 +36,16 @@ class AuthRepository(
         val auth = api.googleSignIn(idToken, device)
         withContext(Dispatchers.IO) {
             db.cachedCalls().clear() // a previous session may have ended by revocation without signOut()
+            // Outcomes queued before a server-side session end are kept; send them only as the rep who logged them.
+            val prefs = appContext.getSharedPreferences("activity_queue", Context.MODE_PRIVATE)
+            val owner = prefs.getString(KEY_QUEUE_OWNER, null)
+            if (owner != null && owner != auth.user.id) db.pendingActivities().deleteAll()
+            prefs.edit().putString(KEY_QUEUE_OWNER, auth.user.id).apply()
             tokens.save(auth)
         }
+        // Resume anything a sign-out or session end paused: kept outcomes and pending recordings.
+        com.usaindiacfo.uicrecorder.sync.SyncScheduler.enqueueActivities(appContext)
+        com.usaindiacfo.uicrecorder.sync.SyncScheduler.syncNow(appContext)
         return auth.user
     }
 
@@ -56,5 +64,10 @@ class AuthRepository(
         db.clearAllTables()
         DialPrefs(appContext).pending = null // a dial from this session must not be logged as the next rep
         google.clear(appContext)
+    }
+
+    companion object {
+        /** User id whose dialer outcomes are in the local queue (also set by ActivityRepository.log). */
+        const val KEY_QUEUE_OWNER = "owner"
     }
 }

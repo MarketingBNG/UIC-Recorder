@@ -72,7 +72,7 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
             val page = c.apiClient.contacts(q = q.trim().ifEmpty { null })
             _state.update { it.copy(contacts = page.items, loading = false, error = null) }
         } catch (e: IOException) {
-            _state.update { it.copy(loading = false, error = e.message ?: "Can't reach the server") }
+            _state.update { it.copy(loading = false, error = friendlyError(e)) }
         }
     }
 
@@ -82,7 +82,7 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
             val list = c.apiClient.followups()
             _state.update { it.copy(followUps = list.items, loading = false, error = null) }
         } catch (e: IOException) {
-            _state.update { it.copy(loading = false, error = e.message ?: "Can't reach the server") }
+            _state.update { it.copy(loading = false, error = friendlyError(e)) }
         }
     }
 }

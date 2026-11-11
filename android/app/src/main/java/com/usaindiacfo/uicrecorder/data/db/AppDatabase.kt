@@ -14,6 +14,16 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun clientHashes(): ClientHashDao
     abstract fun pendingActivities(): PendingActivityDao
 
+    /**
+     * Session ended by the server (revoked device, expired refresh): drop cached and sync state but keep queued
+     * dialer outcomes, which exist nowhere else. They are sent after the same rep signs in again, and dropped if
+     * a different rep signs in (see AuthRepository.signIn). Recordings are rediscovered by the next scan.
+     */
+    fun clearExceptQueuedActivities() = runInTransaction {
+        val db = openHelper.writableDatabase
+        listOf("recordings", "cached_calls", "client_hashes").forEach { db.execSQL("DELETE FROM `$it`") }
+    }
+
     companion object {
         /** v2 (Milestone 3): business-only client list. Keeps all recording sync state. */
         val MIGRATION_1_2 = object : Migration(1, 2) {

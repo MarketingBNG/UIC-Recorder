@@ -23,8 +23,9 @@ class AppContainer(private val context: Context) {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val tokenStore by lazy {
         TokenStore(context).apply {
-            // Session ended server-side: drop cached call data and stop sync, as signOut() does.
-            onSessionEnded = { appScope.launch { SyncScheduler.cancelSyncWork(context); db.clearAllTables(); DialPrefs(context).pending = null } }
+            // Session ended server-side: stop sync and drop cached call data, but keep unsent dialer outcomes
+            // (signOut() is the explicit "wipe everything").
+            onSessionEnded = { appScope.launch { SyncScheduler.cancelSyncWork(context); db.clearExceptQueuedActivities(); DialPrefs(context).pending = null } }
         }
     }
     val apiClient by lazy { ApiClient(BuildConfig.API_URL, tokenStore) }
@@ -32,7 +33,7 @@ class AppContainer(private val context: Context) {
     val googleSignIn by lazy { GoogleSignIn(BuildConfig.GOOGLE_WEB_CLIENT_ID) }
     val authRepository by lazy { AuthRepository(context, apiClient, tokenStore, db, googleSignIn) }
     val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient, db.clientHashes()) }
-    val activityRepository by lazy { ActivityRepository(context, db.pendingActivities()) }
+    val activityRepository by lazy { ActivityRepository(context, db.pendingActivities()) { tokenStore.user.value?.id } }
 
     /** Low-RAM phones (or < 3 GB): hash/compress/upload one file at a time. */
     val isLowRamDevice: Boolean by lazy {

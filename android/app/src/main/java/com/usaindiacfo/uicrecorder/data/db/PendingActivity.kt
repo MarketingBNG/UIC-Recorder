@@ -59,4 +59,10 @@ interface PendingActivityDao {
 
     @Query("SELECT COUNT(*) FROM pending_activities WHERE lastError IS NULL")
     fun observePendingCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM pending_activities WHERE lastError IS NULL")
+    suspend fun pendingCount(): Int
+
+    @Query("DELETE FROM pending_activities")
+    suspend fun deleteAll()
 }

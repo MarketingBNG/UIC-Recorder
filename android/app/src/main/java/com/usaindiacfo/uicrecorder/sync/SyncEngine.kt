@@ -175,8 +175,10 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             when {
                 e.isAuth -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.SIGNED_OUT }
                 e.code == 413 || e.code == 415 -> { dao.setStatus(r.id, RecordingStatus.SKIPPED, e.message); UploadOutcome.DONE }
-                // Server upload rate limit: like network trouble, don't burn an attempt.
-                e.code == 429 -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
+                // Server down, redeploying, rate-limited, or a proxy error page: not this file's fault. Keep it
+                // pending without burning an attempt (5 burns = FAILED for good), and end the run so the other
+                // files don't each wait out the same failure; WorkManager backs off and retries.
+                e.isTransient -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
                 else -> { dao.markFailed(r.id, e.message); UploadOutcome.RETRY }
             }
         } catch (e: FileNotFoundException) {
@@ -185,8 +187,9 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             dao.setStatus(r.id, RecordingStatus.SKIPPED, "No access"); UploadOutcome.DONE
         } catch (e: IOException) {
             if (e.cause is SecurityException) { dao.setStatus(r.id, RecordingStatus.SKIPPED, "No access"); UploadOutcome.DONE }
-            // Network trouble: don't burn an attempt, WorkManager backs off and retries.
-            else { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.RETRY }
+            // Network trouble: don't burn an attempt, and stop the run (the next file would hit the same timeout);
+            // WorkManager backs off and retries.
+            else { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
         } catch (e: CancellationException) {
             withContext(NonCancellable) { dao.setStatus(r.id, RecordingStatus.PENDING, null) }
             throw e
