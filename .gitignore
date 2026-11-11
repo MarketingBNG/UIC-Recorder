@@ -15,7 +15,9 @@ client_secret*.json
 
 # Local data (dev database, uploaded recordings, imports)
 .pgdata/
-data/
+/data/
+server/data/
+worker/data/
 recordings/
 
 # Build output & dependencies
