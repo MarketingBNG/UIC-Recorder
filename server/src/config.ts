@@ -31,6 +31,8 @@ const schema = z.object({
   WORKER_TOKEN: z.string().min(32),
   // Optional: enables /internal/import/* for bulk-importing already-copied recordings.
   IMPORT_TOKEN: z.string().min(32).optional().or(z.literal("").transform(() => undefined)),
+  // Optional: enables POST /internal/app/publish, used by CI to publish a signed APK for the in-app updater.
+  APP_PUBLISH_TOKEN: z.string().min(32).optional().or(z.literal("").transform(() => undefined)),
 
   // Optional Zoho Cliq channel incoming-webhook URL (includes its zapikey: a secret). Empty = alerts off.
   CLIQ_WEBHOOK_URL: z.url().optional().or(z.literal("").transform(() => undefined)),

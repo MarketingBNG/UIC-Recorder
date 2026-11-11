@@ -1,4 +1,6 @@
-# Tests, builds, dependency audits and a secret scan on every push and PR. Needs no repository secrets.
+# Tests, builds, dependency audits and a secret scan on every push and PR (no secrets needed for these).
+# On a push to main that changes android/, the release job builds a signed APK and publishes it to the server,
+# so phones get the in-app update banner. That job needs the repository secrets listed on it.
 name: CI
 
 on:
@@ -95,3 +97,68 @@ jobs:
         run: >
           docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:v8.24.0
           git /repo --config /repo/.gitleaks.toml --redact --no-banner --verbose
+
+  release:
+    name: Publish app update
+    needs: [server, worker, android, secrets]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    # Repository secrets: UIC_KEYSTORE_B64 (base64 of the release .jks), UIC_KEYSTORE_PASSWORD,
+    # UIC_API_URL (https://...), UIC_GOOGLE_WEB_CLIENT_ID, APP_PUBLISH_TOKEN (same as the server's env var).
+    env:
+      API_URL: ${{ secrets.UIC_API_URL }}
+      PUBLISH_TOKEN: ${{ secrets.APP_PUBLISH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Did the app change?
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "app=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          before="${{ github.event.before }}"
+          if [ -z "$before" ] || ! git cat-file -e "$before" 2>/dev/null; then echo "app=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if git diff --quiet "$before" "${{ github.sha }}" -- android/; then echo "app=false" >> "$GITHUB_OUTPUT"; else echo "app=true" >> "$GITHUB_OUTPUT"; fi
+      - name: Secrets present?
+        id: ready
+        if: steps.changed.outputs.app == 'true'
+        run: |
+          if [ -n "${{ secrets.UIC_KEYSTORE_B64 }}" ] && [ -n "$API_URL" ] && [ -n "$PUBLISH_TOKEN" ]; then echo "ok=true" >> "$GITHUB_OUTPUT"
+          else echo "::warning::Release secrets not set; skipping app publish"; echo "ok=false" >> "$GITHUB_OUTPUT"; fi
+      - uses: actions/setup-java@v5
+        if: steps.ready.outputs.ok == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v5
+        if: steps.ready.outputs.ok == 'true'
+      - name: Build signed release APK
+        if: steps.ready.outputs.ok == 'true'
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.UIC_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.UIC_KEYSTORE_PASSWORD }}
+          WEB_CLIENT_ID: ${{ secrets.UIC_GOOGLE_WEB_CLIENT_ID }}
+        run: |
+          chmod +x gradlew
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          # Run numbers only grow, so every published build is newer than the last (local builds stay at 4).
+          echo "VERSION_CODE=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=0.3.$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          ./gradlew :app:assembleRelease --stacktrace             -Puic.keystore="$RUNNER_TEMP/release.jks" -Puic.keystorePassword="$KEYSTORE_PASSWORD"             -Puic.apiUrl="$API_URL" -Puic.googleWebClientId="$WEB_CLIENT_ID"             -Puic.versionCode="$((100 + GITHUB_RUN_NUMBER))" -Puic.versionName="0.3.$GITHUB_RUN_NUMBER"
+          rm -f "$RUNNER_TEMP/release.jks"
+      - name: Publish to the server
+        if: steps.ready.outputs.ok == 'true'
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          sha=$(sha256sum "$apk" | cut -d' ' -f1)
+          code=$(curl -sS -o "$RUNNER_TEMP/publish.json" -w '%{http_code}' -X POST "$API_URL/internal/app/publish"             -H "Authorization: Bearer $PUBLISH_TOKEN"             -H "Content-Type: application/vnd.android.package-archive"             -H "X-Version-Code: $VERSION_CODE" -H "X-Version-Name: $VERSION_NAME" -H "X-Content-SHA256: $sha"             --data-binary "@$apk")
+          cat "$RUNNER_TEMP/publish.json"; echo
+          [ "$code" = 201 ] || [ "$code" = 200 ] || { echo "::error::Publish failed with HTTP $code"; exit 1; }
+          echo "Published $VERSION_NAME (versionCode $VERSION_CODE)" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: steps.ready.outputs.ok == 'true'
+        with:
+          name: uic-recorder-${{ env.VERSION_NAME }}
+          path: android/app/build/outputs/apk/release/app-release.apk
+          retention-days: 30
