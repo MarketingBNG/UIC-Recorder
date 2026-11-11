@@ -112,6 +112,43 @@ describe("POST /v1/activities", () => {
   });
 });
 
+describe("POST /v1/activities/batch", () => {
+  it("stores items in order, reports bad ones without stopping, and is idempotent", async () => {
+    const rep = await t.loginDevice(uniqueEmail("agent"));
+    const phone = randomMobile();
+    const t0 = Date.now() - 60_000;
+    const items = [
+      { clientId: randomUUID(), phone, type: "CALL", outcome: "NO_ANSWER", durationS: 0, occurredAt: iso(new Date(t0)) },
+      { clientId: randomUUID(), phone: "not-a-number", type: "CALL", outcome: "INTERESTED", occurredAt: iso(new Date(t0 + 1000)) },
+      { clientId: randomUUID(), phone, type: "CALL", outcome: "CALL_BACK", occurredAt: iso(new Date(t0 + 2000)) }, // no date
+      { clientId: randomUUID(), phone, type: "CALL", outcome: "INTERESTED", durationS: 42, occurredAt: iso(new Date(t0 + 3000)) },
+      { type: "CALL" }, // malformed
+    ];
+    const send = () => t.app.inject({ method: "POST", url: "/v1/activities/batch", headers: rep.headers, payload: { items } });
+    const res = await send();
+    expect(res.statusCode).toBe(200);
+    const results = res.json().results as { clientId: string | null; ok: boolean; status?: number }[];
+    expect(results.map((r) => r.ok)).toEqual([true, false, false, true, false]);
+    expect(results.map((r) => r.status ?? null)).toEqual([null, 400, 400, null, 400]);
+    expect(results[0]!.clientId).toBe(items[0]!.clientId);
+
+    const contact = await t.db.contact.findUniqueOrThrow({ where: { phoneE164: `+91${phone}` } });
+    expect(contact.status).toBe("INTERESTED"); // newest stored outcome wins
+    expect(await t.db.activity.count({ where: { contactId: contact.id } })).toBe(2);
+
+    // Resending the same batch (phone never saw the reply) stores nothing twice.
+    expect((await send()).json().results.map((r: { ok: boolean }) => r.ok)).toEqual([true, false, false, true, false]);
+    expect(await t.db.activity.count({ where: { contactId: contact.id } })).toBe(2);
+  });
+
+  it("rejects empty and oversized batches", async () => {
+    const rep = await t.loginDevice(uniqueEmail("agent"));
+    const send = (items: unknown[]) => t.app.inject({ method: "POST", url: "/v1/activities/batch", headers: rep.headers, payload: { items } });
+    expect((await send([])).statusCode).toBe(400);
+    expect((await send(Array.from({ length: 51 }, () => ({})))).statusCode).toBe(400);
+  });
+});
+
 describe("device contact endpoints", () => {
   it("lists, finds by phone, lists follow-ups and patches within the rep scope", async () => {
     const a = await t.loginDevice(uniqueEmail("rep"));

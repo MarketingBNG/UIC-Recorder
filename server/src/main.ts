@@ -54,9 +54,20 @@ const stopRetention = startRetentionLoop(
   (r) => app.log.info(r, "retention: deleted old audio files"),
 );
 
+// Every 6 h, drop half-uploaded files no phone has continued for 3 days.
+const sweepPartials = () =>
+  storage.sweepPartials(3 * 86400_000).then(
+    (n) => n > 0 && app.log.info({ removed: n }, "removed stale partial uploads"),
+    (err: unknown) => app.log.error({ err }, "partial upload sweep failed"),
+  );
+void sweepPartials();
+const partialTimer = setInterval(sweepPartials, 6 * 3600_000);
+partialTimer.unref();
+
 const shutdown = async () => {
   stopAlerts();
   stopRetention();
+  clearInterval(partialTimer);
   await app.close();
   await db.$disconnect();
   process.exit(0);

@@ -39,7 +39,10 @@ class AuthRepository(
             // Outcomes queued before a server-side session end are kept; send them only as the rep who logged them.
             val prefs = appContext.getSharedPreferences("activity_queue", Context.MODE_PRIVATE)
             val owner = prefs.getString(KEY_QUEUE_OWNER, null)
-            if (owner != null && owner != auth.user.id) db.pendingActivities().deleteAll()
+            if (owner != null && owner != auth.user.id) {
+                db.pendingActivities().deleteAll()
+                com.usaindiacfo.uicrecorder.dialer.ContactCache(appContext).clear()
+            }
             prefs.edit().putString(KEY_QUEUE_OWNER, auth.user.id).apply()
             tokens.save(auth)
         }
@@ -62,6 +65,7 @@ class AuthRepository(
         tokens.refreshToken?.let { runCatching { api.logout(it) } }
         tokens.clear()
         db.clearAllTables()
+        com.usaindiacfo.uicrecorder.dialer.ContactCache(appContext).clear() // the next rep must not see these contacts
         DialPrefs(appContext).pending = null // a dial from this session must not be logged as the next rep
         google.clear(appContext)
     }

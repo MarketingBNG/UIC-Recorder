@@ -99,6 +99,89 @@ describe("call upload", () => {
   });
 });
 
+describe("resumable upload", () => {
+  const register = async (headers: Record<string, string>) => {
+    const created = await t.app.inject({ method: "POST", url: "/v1/calls", headers, payload: meta(sha256(randomBytes(16))) });
+    return created.json().callId as string;
+  };
+  const putPart = (headers: Record<string, string>, callId: string, sha: string, part: Buffer, offset: number, total: number) =>
+    t.app.inject({
+      method: "PUT",
+      url: `/v1/calls/${callId}/audio`,
+      headers: {
+        ...headers,
+        "content-type": "audio/mp4",
+        "x-content-sha256": sha,
+        "upload-offset": String(offset),
+        "upload-length": String(total),
+      },
+      payload: part,
+    });
+  const progress = (headers: Record<string, string>, callId: string, sha: string) =>
+    t.app.inject({ url: `/v1/calls/${callId}/audio/progress?sha256=${sha}`, headers });
+
+  it("continues from where a dropped upload stopped, then verifies the whole file", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    const callId = await register(s.headers);
+    const audio = randomBytes(10_000);
+    const sha = sha256(audio);
+
+    expect((await progress(s.headers, callId, sha)).json()).toEqual({ complete: false, received: 0 });
+    const first = await putPart(s.headers, callId, sha, audio.subarray(0, 4000), 0, audio.length);
+    expect(first.statusCode).toBe(202);
+    expect(first.headers["upload-offset"]).toBe("4000");
+    expect((await progress(s.headers, callId, sha)).json()).toEqual({ complete: false, received: 4000 });
+
+    // Wrong offset (e.g. the phone thinks nothing arrived): told where to continue, nothing appended.
+    const wrong = await putPart(s.headers, callId, sha, audio, 0, audio.length);
+    expect(wrong.statusCode).toBe(409);
+    expect(wrong.headers["upload-offset"]).toBe("4000");
+
+    const rest = await putPart(s.headers, callId, sha, audio.subarray(4000), 4000, audio.length);
+    expect(rest.statusCode).toBe(201);
+    expect(rest.json()).toMatchObject({ callId, complete: true, alreadyUploaded: false });
+    const call = await t.db.call.findUniqueOrThrow({ where: { id: callId } });
+    expect(call.status).toBe("UPLOADED");
+    expect(Number(call.fileSize)).toBe(audio.length);
+    expect(call.uploadSha256).toBe(sha);
+    expect(await t.db.job.count({ where: { callId } })).toBe(1);
+    expect((await progress(s.headers, callId, sha)).json()).toEqual({ complete: true, received: 0 });
+  });
+
+  it("rejects an assembled file whose checksum does not match, and keeps the call pending", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    const callId = await register(s.headers);
+    const audio = randomBytes(2000);
+    const claimed = sha256(randomBytes(8));
+    const res = await putPart(s.headers, callId, claimed, audio, 0, audio.length);
+    expect(res.statusCode).toBe(422);
+    expect((await t.db.call.findUniqueOrThrow({ where: { id: callId } })).status).toBe("PENDING_UPLOAD");
+    expect((await progress(s.headers, callId, claimed)).json()).toEqual({ complete: false, received: 0 });
+  });
+
+  it("needs Upload-Length with Upload-Offset and enforces the size limit on the total", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    const callId = await register(s.headers);
+    const audio = randomBytes(100);
+    const noLength = await t.app.inject({
+      method: "PUT",
+      url: `/v1/calls/${callId}/audio`,
+      headers: { ...s.headers, "content-type": "audio/mp4", "x-content-sha256": sha256(audio), "upload-offset": "0" },
+      payload: audio,
+    });
+    expect(noLength.statusCode).toBe(400);
+    const huge = await putPart(s.headers, callId, sha256(audio), audio, 0, 10 ** 12);
+    expect(huge.statusCode).toBe(413);
+  });
+
+  it("does not reveal another user's upload progress", async () => {
+    const a = await t.loginDevice(uniqueEmail());
+    const b = await t.loginDevice(uniqueEmail());
+    const callId = await register(a.headers);
+    expect((await progress(b.headers, callId, sha256(Buffer.from("x")))).statusCode).toBe(404);
+  });
+});
+
 describe("worker jobs + search", () => {
   it("claims without overlap, completes, and makes transcripts searchable within scope", async () => {
     const agentEmail = uniqueEmail("agent");

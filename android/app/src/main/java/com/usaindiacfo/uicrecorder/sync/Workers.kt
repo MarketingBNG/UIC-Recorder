@@ -26,6 +26,15 @@ class NewRecordingWorker(ctx: Context, params: WorkerParameters) : CoroutineWork
         if (!inputData.getBoolean(KEY_ONE_SHOT, false)) SyncScheduler.enqueueTrigger(ctx, ExistingWorkPolicy.APPEND_OR_REPLACE)
         if (!ctx.signedIn) return Result.success()
         val c = ctx.container
+        // Content trigger: skip the folder scan (and the config request) when the changed audio is not in a
+        // recorder folder, e.g. music or a WhatsApp voice note. A picked SAF folder isn't in MediaStore, so scan then.
+        if (!inputData.getBoolean(KEY_ONE_SHOT, false) && SyncPrefs(ctx).safTreeUri == null) {
+            val prefs = SyncPrefs(ctx)
+            val folders = c.deviceConfigRepository.current().recorderFolders
+            val relevant = com.usaindiacfo.uicrecorder.detect.RecorderScanner(ctx)
+                .anyRecorderChange(triggeredContentUris, folders, prefs.discoveredFolders, prefs.excludedFolders)
+            if (!relevant) return Result.success()
+        }
         if (inputData.getBoolean(KEY_RESET_FAILED, false)) c.db.recordings().resetFailed()
         val cfg = c.deviceConfigRepository.refreshIfStale()
         val scan = runCatching { SyncEngine(ctx, c).scan(cfg, System.currentTimeMillis() - 2 * DAY_MS) }.getOrNull()
@@ -104,27 +113,48 @@ class ActivityWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         if (!ctx.signedIn) return Result.success()
         val c = ctx.container
         val dao = c.db.pendingActivities()
+        var batched = true // false once the server says it has no batch endpoint (older deploy)
         while (!isStopped) {
             val batch = dao.nextBatch()
             if (batch.isEmpty()) return Result.success()
-            for (row in batch) {
-                if (isStopped) break
-                try {
-                    c.apiClient.postActivity(row.toRequest())
-                    dao.delete(row.clientId)
-                } catch (e: ApiException) {
-                    when {
-                        e.isAuth -> return Result.success() // signed out; nothing to send as
-                        // Bad phone number or missing follow-up date: retrying never helps, so park the row. Other 4xx (404/405 while
-                        // the server is mid-deploy or older than the app) are retried rather than dropped.
-                        // Only trust a 400/422 that our server itself sent; a proxy page is retried like any outage.
-                        (e.code == 400 || e.code == 422) && e.fromServer -> dao.markFailed(row.clientId, e.message ?: "HTTP ${e.code}")
-                        else -> { dao.bumpAttempts(row.clientId); return Result.retry() }
+            try {
+                if (batched) {
+                    // Up to 50 in one request: after an outage a phone may hold many, and one round trip each is slow.
+                    val results = try {
+                        c.apiClient.postActivities(batch.map { it.toRequest() }).results
+                    } catch (e: ApiException) {
+                        if (e.code == 404 && e.fromServer) { batched = false; continue } else throw e
                     }
-                } catch (_: IOException) {
-                    dao.bumpAttempts(row.clientId)
-                    return Result.retry()
+                    val byId = results.associateBy { it.clientId }
+                    for (row in batch) {
+                        val r = byId[row.clientId]
+                        when {
+                            r == null -> dao.bumpAttempts(row.clientId) // not reported: send again next time
+                            r.ok -> dao.delete(row.clientId)
+                            // Rejected by our server (bad number, missing follow-up date, someone else's id): park it.
+                            else -> dao.markFailed(row.clientId, r.error ?: "HTTP ${r.status}")
+                        }
+                    }
+                } else {
+                    for (row in batch) {
+                        if (isStopped) break
+                        try {
+                            c.apiClient.postActivity(row.toRequest())
+                            dao.delete(row.clientId)
+                        } catch (e: ApiException) {
+                            // Only trust a 400/422 that our server itself sent; a proxy page is retried like any outage.
+                            if ((e.code == 400 || e.code == 422 || e.code == 409) && e.fromServer) dao.markFailed(row.clientId, e.message ?: "HTTP ${e.code}")
+                            else throw e
+                        }
+                    }
                 }
+            } catch (e: ApiException) {
+                if (e.isAuth) return Result.success() // signed out; nothing to send as
+                batch.firstOrNull()?.let { dao.bumpAttempts(it.clientId) }
+                return Result.retry()
+            } catch (_: IOException) {
+                batch.firstOrNull()?.let { dao.bumpAttempts(it.clientId) }
+                return Result.retry()
             }
         }
         recordStop(ctx)

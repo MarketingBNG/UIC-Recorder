@@ -31,9 +31,7 @@ class RecorderScanner(private val context: Context) {
         folders: List<String>, sinceMs: Long, safTree: Uri?,
         extra: Collection<String> = emptyList(), excluded: Collection<String> = emptyList(),
     ): List<ScannedFile> {
-        val off = excluded.map(::normFolder).filter { it.isNotEmpty() }
-        val allow = (folders.ifEmpty { DEFAULT_FOLDERS } + extra).map(::normFolder).filter { it.isNotEmpty() && !matches(it, off) }
-            .distinct().let { l -> l.filterNot { a -> l.any { b -> b != a && a.startsWith("$b/") } } }
+        val (allow, off) = allowList(folders, extra, excluded)
         val seenPaths = HashSet<String>()
         val out = ArrayList<ScannedFile>()
         fun add(f: ScannedFile) {
@@ -45,6 +43,42 @@ class RecorderScanner(private val context: Context) {
         }
         safTree?.let { tree -> runCatching { walkTree(tree, sinceMs) }.getOrDefault(emptyList()).forEach(::add) }
         return out.sortedByDescending { it.dateModified }
+    }
+
+    private fun allowList(folders: List<String>, extra: Collection<String>, excluded: Collection<String>): Pair<List<String>, List<String>> {
+        val off = excluded.map(::normFolder).filter { it.isNotEmpty() }
+        val allow = (folders.ifEmpty { DEFAULT_FOLDERS } + extra).map(::normFolder).filter { it.isNotEmpty() && !matches(it, off) }
+            .distinct().let { l -> l.filterNot { a -> l.any { b -> b != a && a.startsWith("$b/") } } }
+        return allow to off
+    }
+
+    /**
+     * For the MediaStore change trigger: could any of these changed items be a call recording? Android reports
+     * every audio change (music, voice notes, ringtones), and a full scan for each one wastes battery. Items in a
+     * recorder folder count; deleted items do not; anything we can't look up (a whole-collection change, too many
+     * items, a query error) counts, so a recording is never missed.
+     */
+    @Suppress("DEPRECATION")
+    fun anyRecorderChange(
+        changed: List<Uri>, folders: List<String>, extra: Collection<String> = emptyList(), excluded: Collection<String> = emptyList(),
+    ): Boolean {
+        if (changed.isEmpty() || changed.size > 50) return true
+        val (allow, off) = allowList(folders, extra, excluded)
+        val q = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+        val cols = if (q) arrayOf(MediaStore.Audio.Media.DATA, MediaStore.Audio.Media.RELATIVE_PATH) else arrayOf(MediaStore.Audio.Media.DATA)
+        val root = legacyRoot().absolutePath
+        return changed.any { uri ->
+            if (uri.lastPathSegment?.toLongOrNull() == null) return@any true // a collection, not one file
+            runCatching {
+                context.contentResolver.query(uri, cols, null, null, null)?.use { c ->
+                    if (!c.moveToFirst()) return@use false // deleted: nothing new to upload
+                    val data = c.getString(0)
+                    val folder = (if (q) c.getString(1) else null) ?: data?.let { relativeDir(it, root) } ?: return@use true
+                    val norm = normFolder(folder)
+                    matches(norm, allow) && !matches(norm, off)
+                } ?: true
+            }.getOrDefault(true)
+        }
     }
 
     /** True if any recording is visible in an allow-listed folder or the SAF tree (setup checklist). */

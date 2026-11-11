@@ -48,7 +48,16 @@ data class CreateCallRequest(
 
 /** 201 → uploadPath set, alreadyUploaded=false; 200 → alreadyUploaded=true (skip the PUT). */
 @Serializable data class CreateCallResponse(val callId: String, val alreadyUploaded: Boolean, val uploadPath: String? = null)
-@Serializable data class UploadResponse(val callId: String, val alreadyUploaded: Boolean)
+@Serializable data class UploadResponse(
+    val callId: String,
+    val alreadyUploaded: Boolean,
+    /** False when only part of a resumable upload arrived; continue from [received]. Older servers omit it. */
+    val complete: Boolean = true,
+    val received: Long? = null,
+)
+
+/** GET /v1/calls/:id/audio/progress: bytes of this file the server already has. */
+@Serializable data class UploadProgress(val complete: Boolean, val received: Long)
 
 // ---- Device -----------------------------------------------------------------
 
@@ -447,6 +456,15 @@ data class ActivityDto(
 )
 
 /** POST /v1/activities. Idempotent by [clientId] (a UUID made on the phone). Null fields are not sent. */
+@Serializable
+data class ActivityBatchRequest(val items: List<CreateActivityRequest>)
+
+@Serializable
+data class ActivityBatchResult(val clientId: String? = null, val ok: Boolean, val status: Int? = null, val error: String? = null)
+
+@Serializable
+data class ActivityBatchResponse(val results: List<ActivityBatchResult>)
+
 @Serializable
 data class CreateActivityRequest(
     val clientId: String,

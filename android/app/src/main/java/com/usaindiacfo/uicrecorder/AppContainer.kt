@@ -25,7 +25,7 @@ class AppContainer(private val context: Context) {
         TokenStore(context).apply {
             // Session ended server-side: stop sync and drop cached call data, but keep unsent dialer outcomes
             // (signOut() is the explicit "wipe everything").
-            onSessionEnded = { appScope.launch { SyncScheduler.cancelSyncWork(context); db.clearExceptQueuedActivities(); DialPrefs(context).pending = null } }
+            onSessionEnded = { appScope.launch { SyncScheduler.cancelSyncWork(context); db.clearExceptQueuedActivities(); contactCache.clear(); DialPrefs(context).pending = null } }
         }
     }
     val apiClient by lazy { ApiClient(BuildConfig.API_URL, tokenStore) }
@@ -33,6 +33,7 @@ class AppContainer(private val context: Context) {
     val googleSignIn by lazy { GoogleSignIn(BuildConfig.GOOGLE_WEB_CLIENT_ID) }
     val authRepository by lazy { AuthRepository(context, apiClient, tokenStore, db, googleSignIn) }
     val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient, db.clientHashes()) }
+    val contactCache by lazy { com.usaindiacfo.uicrecorder.dialer.ContactCache(context) }
     val activityRepository by lazy { ActivityRepository(context, db.pendingActivities()) { tokenStore.user.value?.id } }
 
     /** Low-RAM phones (or < 3 GB): hash/compress/upload one file at a time. */

@@ -25,8 +25,6 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.asRequestBody
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
@@ -111,6 +109,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     /** Uploads pending files for [source], newest first; one at a time on low-RAM phones. */
     suspend fun upload(source: RecordingSource, cfg: DeviceConfig, isStopped: () -> Boolean): UploadOutcome = withContext(Dispatchers.IO) {
         dao.resetStuckUploads(source) // one worker per source, so nothing of this source is really in flight
+        sweepUploadCache()
         val parallel = if (c.isLowRamDevice) 1 else cfg.maxParallelUploads.coerceIn(1, 4)
         val tried = HashSet<Long>()
         var outcome = UploadOutcome.DONE
@@ -144,7 +143,10 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
         val sha = r.sha256 ?: hash(r) ?: return UploadOutcome.DONE
         val uri = Uri.parse(r.uri)
         val mime = AudioMime.normalize(r.mimeType, r.displayName)
-        val tmp = File(context.cacheDir, "upload").apply { mkdirs() }.resolve("${r.id}.m4a")
+        val dir = File(context.cacheDir, "upload").apply { mkdirs() }
+        val tmp = dir.resolve("${r.id}.m4a")
+        val tmpSha = dir.resolve("${r.id}.sha") // written only once tmp is complete, so its presence means "reusable"
+        var keepTmp = false // a retry is coming: keep the compressed copy so it isn't re-encoded and can resume
         dao.setStatus(r.id, RecordingStatus.UPLOADING)
         return try {
             val created = api.createCall(
@@ -160,12 +162,20 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
                 ),
             )
             if (!created.alreadyUploaded) {
-                val compressed = (cfg.compressAudio || mime == null) &&
-                    (mime == null || Compressor.worthCompressing(r.size, r.durationS)) &&
-                    Compressor(context).compress(uri, tmp) && tmp.length() < r.size
+                val reused = tmp.exists() && tmpSha.exists()
+                if (!reused) { tmp.delete(); tmpSha.delete() } // leftovers of an interrupted encode
+                val compressed = reused || (
+                    (cfg.compressAudio || mime == null) &&
+                        (mime == null || Compressor.worthCompressing(r.size, r.durationS)) &&
+                        Compressor(context).compress(uri, tmp) && tmp.length() < r.size
+                    ).also { ok -> if (ok) tmpSha.writeText(Hasher.sha256(tmp)) }
                 when {
-                    compressed -> api.uploadAudio(created.callId, tmp.asRequestBody(Compressor.OUTPUT_MIME.toMediaType()), Hasher.sha256(tmp))
-                    mime != null -> api.uploadAudio(created.callId, ApiClient.contentUriBody(context.contentResolver, uri, mime, r.size), sha)
+                    compressed -> sendResumable(created.callId, tmpSha.readText(), tmp.length()) { off ->
+                        ApiClient.fileBody(tmp, Compressor.OUTPUT_MIME, off)
+                    }
+                    mime != null -> sendResumable(created.callId, sha, r.size) { off ->
+                        ApiClient.contentUriBody(context.contentResolver, uri, mime, r.size, off)
+                    }
                     else -> { dao.setStatus(r.id, RecordingStatus.SKIPPED, "Unsupported audio format"); return UploadOutcome.DONE }
                 }
             }
@@ -178,7 +188,9 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
                 // Server down, redeploying, rate-limited, or a proxy error page: not this file's fault. Keep it
                 // pending without burning an attempt (5 burns = FAILED for good), and end the run so the other
                 // files don't each wait out the same failure; WorkManager backs off and retries.
-                e.isTransient -> { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
+                e.isTransient -> { keepTmp = true; dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
+                // Resume offset out of step (e.g. two runs raced): the next run asks the server again.
+                e.code == 409 -> { keepTmp = true; dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.RETRY }
                 else -> { dao.markFailed(r.id, e.message); UploadOutcome.RETRY }
             }
         } catch (e: FileNotFoundException) {
@@ -189,18 +201,46 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             if (e.cause is SecurityException) { dao.setStatus(r.id, RecordingStatus.SKIPPED, "No access"); UploadOutcome.DONE }
             // Network trouble: don't burn an attempt, and stop the run (the next file would hit the same timeout);
             // WorkManager backs off and retries.
-            else { dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
+            else { keepTmp = true; dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
         } catch (e: CancellationException) {
+            keepTmp = true
             withContext(NonCancellable) { dao.setStatus(r.id, RecordingStatus.PENDING, null) }
             throw e
         } catch (e: Exception) {
             dao.markFailed(r.id, e.message ?: e.javaClass.simpleName); UploadOutcome.RETRY
         } finally {
-            tmp.delete()
+            if (!keepTmp) { tmp.delete(); tmpSha.delete() }
         }
     }
 
+    /**
+     * Sends a file the server can resume: asks how many bytes an earlier, interrupted attempt delivered and sends
+     * only the rest. Small files and servers without resume support get a plain one-shot upload.
+     */
+    private suspend fun sendResumable(callId: String, sha: String, total: Long, bodyFrom: (Long) -> okhttp3.RequestBody) {
+        if (total < RESUME_MIN_BYTES) { api.uploadAudio(callId, bodyFrom(0), sha); return }
+        val offset = try {
+            val p = api.uploadProgress(callId, sha)
+            if (p.complete) return
+            p.received.coerceIn(0, total)
+        } catch (e: ApiException) {
+            if (e.code == 404 && e.fromServer) -1L else throw e // 404: server predates resumable uploads
+        }
+        if (offset < 0) { api.uploadAudio(callId, bodyFrom(0), sha); return }
+        val res = api.uploadAudio(callId, bodyFrom(offset), sha, offset, total)
+        if (!res.complete) throw IOException("Upload stopped at ${res.received ?: 0} of $total bytes")
+    }
+
+    /** Compressed copies kept for a retry that never came (row skipped or removed): drop after 3 days. */
+    private fun sweepUploadCache() {
+        val cutoff = System.currentTimeMillis() - 3 * 24 * 3600_000L
+        File(context.cacheDir, "upload").listFiles()?.forEach { if (it.lastModified() < cutoff) it.delete() }
+    }
+
     companion object {
+        /** Below this a dropped upload is cheap to repeat, so skip the extra progress request. */
+        const val RESUME_MIN_BYTES = 256 * 1024L
+
         /** Files modified this recently may still be recording. */
         const val SETTLE_MS = 30_000L
         /** Files newer than this are LIVE, older BACKLOG. */

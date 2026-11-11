@@ -25,6 +25,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.Response
 import okhttp3.Route
 import okio.BufferedSink
+import okio.buffer
 import okio.source
 import java.io.File
 import java.io.IOException
@@ -96,6 +97,9 @@ class ApiClient(
     private val longHttp = http.newBuilder()
         .writeTimeout(10, TimeUnit.MINUTES)
         .readTimeout(2, TimeUnit.MINUTES)
+        // OkHttp would silently resend a dropped upload from byte 0 with the old Upload-Offset. SyncEngine
+        // resumes instead (asks the server how much arrived), so a retry here only wastes data.
+        .retryOnConnectionFailure(false)
         .build()
 
     // ---- Auth -------------------------------------------------------------
@@ -120,13 +124,22 @@ class ApiClient(
      * actually sent (the compressed file when compressed), not originalSha256. Server answers 422 on mismatch.
      * Body content type must be an audio type the server allows (audio/mp4, audio/aac, audio/mpeg, audio/amr, ...).
      */
-    suspend fun uploadAudio(callId: String, body: RequestBody, sha256: String): UploadResponse {
+    /**
+     * Uploads the file whose SHA-256 is [sha256]. With [totalLength] the upload is resumable: [body] holds the
+     * bytes from [offset] on, and the server keeps what arrives if the connection drops.
+     */
+    suspend fun uploadAudio(callId: String, body: RequestBody, sha256: String, offset: Long? = null, totalLength: Long? = null): UploadResponse {
         val req = Request.Builder().url(url("/v1/calls/$callId/audio"))
             .header("X-Content-SHA256", sha256)
+            .apply { if (offset != null && totalLength != null) header("Upload-Offset", "$offset").header("Upload-Length", "$totalLength") }
             .put(body)
             .build()
         return json.decodeFromString(longHttp.newCall(req).awaitBody())
     }
+
+    /** How much of this file a previous, interrupted upload delivered. 404 from servers without resume support. */
+    suspend fun uploadProgress(callId: String, sha256: String): UploadProgress =
+        get("/v1/calls/$callId/audio/progress", mapOf("sha256" to sha256))
 
     // ---- Device -----------------------------------------------------------
 
@@ -158,6 +171,10 @@ class ApiClient(
     // ---- Activity tracker (dialer) ----------------------------------------
 
     suspend fun postActivity(req: CreateActivityRequest): CreateActivityResponse = post("/v1/activities", req)
+
+    /** Up to 50 queued activities in one request; each item reports its own result. 404 on older servers. */
+    suspend fun postActivities(items: List<CreateActivityRequest>): ActivityBatchResponse =
+        post("/v1/activities/batch", ActivityBatchRequest(items))
 
     /** Contacts the rep owns or has any activity on; [q] matches name, company or phone. */
     suspend fun contacts(q: String? = null, cursor: String? = null, limit: Int = 50): ContactPage =
@@ -361,15 +378,32 @@ class ApiClient(
         private val JSON = "application/json".toMediaType()
 
         /** Re-openable streaming body for a content:// recording (not one-shot, so auth retries work). */
-        fun contentUriBody(resolver: ContentResolver, uri: Uri, mime: String, length: Long = -1): RequestBody =
+        /** Streams [uri] from byte [offset] on ([length] is the whole file's size, or -1 if unknown). */
+        fun contentUriBody(resolver: ContentResolver, uri: Uri, mime: String, length: Long = -1, offset: Long = 0): RequestBody =
             object : RequestBody() {
                 override fun contentType(): MediaType = mime.toMediaType()
-                override fun contentLength() = length
+                override fun contentLength() = if (length < 0) -1 else length - offset
                 override fun writeTo(sink: BufferedSink) {
                     // Must stay an IOException: anything else thrown on OkHttp's thread crashes the process.
                     val input = try { resolver.openInputStream(uri) } catch (e: SecurityException) { throw IOException("No access: $uri", e) }
                         ?: throw IOException("Cannot open $uri")
-                    input.source().use { sink.writeAll(it) }
+                    input.source().buffer().use { src ->
+                        if (offset > 0) src.skip(offset)
+                        sink.writeAll(src)
+                    }
+                }
+            }
+
+        /** Streams [file] from byte [offset] on. */
+        fun fileBody(file: java.io.File, mime: String, offset: Long = 0): RequestBody =
+            object : RequestBody() {
+                override fun contentType(): MediaType = mime.toMediaType()
+                override fun contentLength() = file.length() - offset
+                override fun writeTo(sink: BufferedSink) {
+                    file.source().buffer().use { src ->
+                        if (offset > 0) src.skip(offset)
+                        sink.writeAll(src)
+                    }
                 }
             }
     }

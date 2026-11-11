@@ -89,29 +89,60 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
 
   // ---- Phone app ----
 
-  app.post("/v1/activities", device, async (req) => {
-    const body = ActivityBody.parse(req.body);
+  /** Stores one activity from the phone (idempotent by clientId). Throws HttpError for a bad item. */
+  const saveFromPhone = async (userId: string, body: z.infer<typeof ActivityBody>) => {
     const phoneE164 = toE164(body.phone, region);
     if (!phoneE164) throw new HttpError(400, "Invalid phone number");
     const followUpAt = body.followUpAt ? new Date(body.followUpAt) : undefined;
     validateActivity({ type: body.type, outcome: body.outcome, followUpAt });
-    const user = currentUser(req);
     // Retry of an already stored activity: return it without touching the contact (409 if not this rep's).
-    const prior = await existingActivity(deps, body.clientId, user.id);
-    const activity =
+    const prior = await existingActivity(deps, body.clientId, userId);
+    return (
       prior ??
-      (await addActivity(deps, user.id, (await upsertContact(deps, phoneE164, user.id, body.name, body.company)).id, {
-      clientId: body.clientId,
-      type: body.type,
-      outcome: body.outcome,
-      note: body.note,
-      followUpAt,
-      durationS: body.durationS,
-      occurredAt: new Date(body.occurredAt),
-    }));
+      (await addActivity(deps, userId, (await upsertContact(deps, phoneE164, userId, body.name, body.company)).id, {
+        clientId: body.clientId,
+        type: body.type,
+        outcome: body.outcome,
+        note: body.note,
+        followUpAt,
+        durationS: body.durationS,
+        occurredAt: new Date(body.occurredAt),
+      }))
+    );
+  };
+
+  app.post("/v1/activities", device, async (req) => {
+    const activity = await saveFromPhone(currentUser(req).id, ActivityBody.parse(req.body));
     const fresh = await deps.db.contact.findUniqueOrThrow({ where: { id: activity.contactId }, include: contactInclude });
     const { callId: _callId, ...dto } = activityDto(activity);
     return { activity: dto, contact: contactDto(fresh) };
+  });
+
+  /**
+   * Up to 50 queued activities in one request (after an outage the phone may hold many). Stored in the order
+   * sent, so a contact ends in the state of its newest outcome. Each item succeeds or fails on its own; an item
+   * that fails validation is reported with its status and does not stop the rest.
+   */
+  app.post("/v1/activities/batch", device, async (req) => {
+    const raw = z.object({ items: z.array(z.unknown()).min(1).max(50) }).parse(req.body).items;
+    const userId = currentUser(req).id;
+    const results = [];
+    for (const item of raw) {
+      const parsed = ActivityBody.safeParse(item);
+      const clientId = typeof (item as { clientId?: unknown })?.clientId === "string" ? (item as { clientId: string }).clientId : null;
+      if (!parsed.success) {
+        results.push({ clientId, ok: false, status: 400, error: parsed.error.issues[0]?.message ?? "Invalid activity" });
+        continue;
+      }
+      try {
+        await saveFromPhone(userId, parsed.data);
+        results.push({ clientId, ok: true });
+      } catch (e) {
+        if (!(e instanceof HttpError) || e.statusCode >= 500) throw e; // server trouble: the phone retries the batch
+        results.push({ clientId, ok: false, status: e.statusCode, error: e.message });
+      }
+    }
+    return { results };
   });
 
   app.get("/v1/contacts", device, async (req) => {

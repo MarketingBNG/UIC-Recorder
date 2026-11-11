@@ -70,9 +70,12 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
         _state.update { it.copy(loading = true) }
         try {
             val page = c.apiClient.contacts(q = q.trim().ifEmpty { null })
+            if (q.isBlank()) c.contactCache.recent = page.items
             _state.update { it.copy(contacts = page.items, loading = false, error = null) }
         } catch (e: IOException) {
-            _state.update { it.copy(loading = false, error = friendlyError(e)) }
+            // Offline: fall back to the last list this phone loaded (filtered locally when searching).
+            val saved = c.contactCache.recent.filter { matchesQuery(it, q) }
+            _state.update { it.copy(contacts = it.contacts.ifEmpty { saved }, loading = false, error = friendlyError(e)) }
         }
     }
 
@@ -80,9 +83,19 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
         _state.update { it.copy(loading = true) }
         try {
             val list = c.apiClient.followups()
+            c.contactCache.followUps = list.items
             _state.update { it.copy(followUps = list.items, loading = false, error = null) }
         } catch (e: IOException) {
-            _state.update { it.copy(loading = false, error = friendlyError(e)) }
+            _state.update { it.copy(followUps = it.followUps.ifEmpty { c.contactCache.followUps }, loading = false, error = friendlyError(e)) }
         }
     }
+}
+
+/** Local search over the saved list: name, company or digits of the number. */
+internal fun matchesQuery(c: ContactDto, q: String): Boolean {
+    val t = q.trim()
+    if (t.isEmpty()) return true
+    val digits = t.filter(Char::isDigit)
+    return c.name?.contains(t, ignoreCase = true) == true || c.company?.contains(t, ignoreCase = true) == true ||
+        (digits.isNotEmpty() && c.phoneE164.filter(Char::isDigit).contains(digits))
 }

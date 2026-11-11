@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireDevice } from "../auth/guards.js";
-import { CallMeta, CheckBody, knownHashes, registerCall, storeAudio } from "../calls/service.js";
+import { CallMeta, CheckBody, audioProgress, knownHashes, registerCall, sha256Hex, storeAudio } from "../calls/service.js";
 import { HttpError, currentDevice, currentUser, type Deps } from "../context.js";
 import { WindowLimiter } from "../privacy/uploadLimit.js";
 import { ALLOWED_AUDIO_MIME } from "../storage/local.js";
@@ -36,7 +36,15 @@ export async function callRoutes(app: FastifyInstance, deps: Deps) {
       reply.header("retry-after", wait);
       throw new HttpError(429, "Too many uploads from this phone; try again later");
     }
-    const r = await storeAudio(deps, req, currentUser(req).id, z.uuid().parse(req.params.id));
+    const r = await storeAudio(deps, req, currentUser(req).id, z.uuid().parse(req.params.id), reply);
+    // 202: part of a resumable upload arrived; the phone continues from `received`.
+    if (!r.complete) return reply.code(202).header("upload-offset", r.received ?? 0).send(r);
     return reply.code(r.alreadyUploaded ? 200 : 201).send(r);
+  });
+
+  /** Resume point for an interrupted upload: how many bytes of the file with this hash the server already has. */
+  app.get<{ Params: { id: string }; Querystring: { sha256?: string } }>("/v1/calls/:id/audio/progress", auth, async (req) => {
+    const sha = sha256Hex.parse(req.query.sha256);
+    return audioProgress(deps, currentUser(req).id, z.uuid().parse(req.params.id), sha);
   });
 }

@@ -16,8 +16,8 @@ android {
         applicationId = "com.usaindiacfo.uicrecorder"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "0.2.1"
+        versionCode = 4
+        versionName = "0.2.2"
         // Set in ~/.gradle/gradle.properties or with -P; the web OAuth client ID is the token audience.
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${providers.gradleProperty("uic.googleWebClientId").getOrElse("")}\"")
     }
