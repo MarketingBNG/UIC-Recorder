@@ -251,6 +251,8 @@ describe("dashboard", () => {
     await post(rep.headers, { phone: randomMobile(), outcome: "NO_ANSWER", durationS: 0 });
     await post(rep.headers, { phone: randomMobile(), outcome: "CALL_BACK", durationS: 30, followUpAt: iso(new Date(start.getTime() + minutes(1))) });
     await post(rep.headers, { phone: randomMobile(), outcome: "CALL_BACK", followUpAt: iso(new Date(start.getTime() - minutes(1))) });
+    // Never connected (0 s in the call log) but the rep chose Call back: not answered.
+    await post(rep.headers, { phone: randomMobile(), outcome: "CALL_BACK", durationS: 0, followUpAt: iso(new Date(start.getTime() + 86400_000 + minutes(1))) });
     await post(rep.headers, { phone: randomMobile(), type: "WHATSAPP" });
     // Outside the range.
     await post(rep.headers, { phone: randomMobile(), outcome: "INTERESTED", durationS: 999, occurredAt: iso(new Date(start.getTime() - 3 * 86400_000)) });
@@ -261,7 +263,7 @@ describe("dashboard", () => {
     const row = res.json().items.find((i: { user: { id: string } }) => i.user.id === rep.user.id);
     expect(row).toEqual({
       user: { id: rep.user.id, name: null, email: repEmail },
-      callsMade: 4,
+      callsMade: 5,
       answered: 3,
       talkTimeS: 150,
       whatsapp: 1,

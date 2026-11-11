@@ -318,7 +318,11 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
       return {
         user: u,
         callsMade: calls.length,
-        answered: calls.filter((a) => a.outcome !== "NO_ANSWER" && ((a.durationS ?? 0) > 0 || a.outcome !== null)).length,
+        // The call log's duration decides when the phone gave one (0 s = never connected, whatever the rep
+        // picked, e.g. Call back after no answer); only without a duration does the outcome decide.
+        answered: calls.filter((a) =>
+          a.durationS != null ? a.durationS > 0 : a.outcome !== null && a.outcome !== "NO_ANSWER",
+        ).length,
         talkTimeS: calls.reduce((s, a) => s + (a.durationS ?? 0), 0),
         whatsapp: mine.length - calls.length,
         followUpsDueToday: countOf(dueToday, u.id),
