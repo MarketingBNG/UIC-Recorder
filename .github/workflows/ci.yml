@@ -78,7 +78,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@v6
       # gradlew was committed from Windows; make sure it is executable.
       - run: chmod +x gradlew
       # Debug builds need no keystore or Google client ID (both come from optional gradle properties).
@@ -130,7 +130,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21
-      - uses: gradle/actions/setup-gradle@v5
+      - uses: gradle/actions/setup-gradle@v6
         if: steps.ready.outputs.ok == 'true'
       - name: Build signed release APK
         if: steps.ready.outputs.ok == 'true'
