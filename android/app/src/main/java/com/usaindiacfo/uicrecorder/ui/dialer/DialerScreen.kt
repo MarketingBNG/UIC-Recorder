@@ -51,6 +51,7 @@ fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
     val vm: DialerViewModel = viewModel(factory = viewModelFactory { initializer { DialerViewModel(container) } })
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val call = rememberCaller()
     @Suppress("DEPRECATION") val clipboard = LocalClipboardManager.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
 
@@ -89,7 +90,7 @@ fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
                 }
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = { Dialer.call(context, number) }, enabled = canDial, modifier = Modifier.weight(1f)) {
+                Button(onClick = { call(number) }, enabled = canDial, modifier = Modifier.weight(1f)) {
                     Icon(Icons.Filled.Call, contentDescription = null)
                     Text("  Call")
                 }
@@ -129,6 +130,7 @@ fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
 @Composable
 private fun ContactRow(contact: ContactDto, showFollowUp: Boolean, onClick: () -> Unit) {
     val context = LocalContext.current
+    val call = rememberCaller()
     val overdue = DialLogic.isOverdue(contact.nextFollowUpAt)
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
@@ -146,7 +148,7 @@ private fun ContactRow(contact: ContactDto, showFollowUp: Boolean, onClick: () -
             when {
                 due != null && overdue -> Text("Overdue\n$due", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                 due != null && showFollowUp -> Text("Due\n$due", style = MaterialTheme.typography.labelSmall)
-                else -> TextButton(onClick = { Dialer.call(context, contact.phoneE164) }) { Text("Call") }
+                else -> TextButton(onClick = { call(contact.phoneE164) }) { Text("Call") }
             }
         },
     )

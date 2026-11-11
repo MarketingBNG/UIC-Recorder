@@ -101,6 +101,7 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
     val vm: ContactDetailViewModel = viewModel(key = "contact-$phone", factory = viewModelFactory { initializer { ContactDetailViewModel(container, phone) } })
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val call = rememberCaller()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.load() }
 
     var name by remember { mutableStateOf("") }
@@ -136,7 +137,7 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
         state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { Dialer.call(context, contact?.phoneE164 ?: phone) }, modifier = Modifier.weight(1f)) { Text("Call") }
+            Button(onClick = { call(contact?.phoneE164 ?: phone) }, modifier = Modifier.weight(1f)) { Text("Call") }
             OutlinedButton(
                 onClick = { if (Dialer.whatsApp(context, contact?.phoneE164 ?: phone)) vm.logWhatsApp() },
                 modifier = Modifier.weight(1f),

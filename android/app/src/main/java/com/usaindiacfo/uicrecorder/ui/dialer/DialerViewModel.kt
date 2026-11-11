@@ -37,6 +37,15 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
         viewModelScope.launch {
             query.debounce(350).distinctUntilChanged().collectLatest { loadContacts(it) }
         }
+        // An outcome is saved on the phone first and sent in the background; reload once it has reached
+        // the server (the queue shrinks), so a newly called number shows up in Recent and Follow-ups.
+        viewModelScope.launch {
+            var last = Int.MAX_VALUE
+            c.db.pendingActivities().observePendingCount().collect { n ->
+                if (n < last) refresh()
+                last = n
+            }
+        }
     }
 
     fun setNumber(n: String) {

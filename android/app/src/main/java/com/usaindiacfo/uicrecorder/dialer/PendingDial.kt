@@ -36,14 +36,20 @@ object Dialer {
     /** A pending dial older than this is dropped instead of asked about. */
     const val MAX_PENDING_AGE_MS = 12 * 3600_000L
 
-    /** Opens the phone's dialer with [number] (no CALL_PHONE permission needed) and remembers the dial. */
+    /**
+     * Places the call straight away when CALL_PHONE is granted (the phone's own dialer still runs the call,
+     * so its auto-record keeps working); otherwise opens the dialer with the number filled in. Remembers the dial.
+     */
     fun call(context: Context, number: String) {
         val n = DialLogic.cleanNumber(number)
         if (n.isEmpty()) return
         val prefs = DialPrefs(context)
         prefs.pending = PendingDial(n, System.currentTimeMillis(), UUID.randomUUID().toString())
+        val direct = context.checkSelfPermission(android.Manifest.permission.CALL_PHONE) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
         try {
-            context.startActivity(Intent(Intent.ACTION_DIAL, Uri.fromParts("tel", n, null)))
+            val action = if (direct) Intent.ACTION_CALL else Intent.ACTION_DIAL
+            context.startActivity(Intent(action, Uri.fromParts("tel", n, null)))
         } catch (_: ActivityNotFoundException) {
             prefs.pending = null
             Toast.makeText(context, "No phone app found", Toast.LENGTH_SHORT).show()
