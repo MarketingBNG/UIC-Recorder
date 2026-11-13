@@ -45,7 +45,7 @@ fun SignInScreen(onSignedIn: () -> Unit) {
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("UIC Recorder", style = MaterialTheme.typography.headlineMedium)
+        Text("UIC Dialer", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
             "Sign in with your usaindiacfo.com Google account to sync your call recordings.",
@@ -87,7 +87,7 @@ private fun friendlyError(e: Exception): String? = when (e) {
     is NoCredentialException -> "No Google account found on this phone. Add your work account in Settings > Accounts."
     is GetCredentialException -> "Google sign-in failed. Please try again."
     is ApiException -> when {
-        e.isForbidden -> "Your account isn't allowed to use UIC Recorder. Ask your admin to add you."
+        e.isForbidden -> "Your account isn't allowed to use UIC Dialer. Ask your admin to add you."
         e.isAuth -> "Google sign-in was rejected. Please try again."
         else -> "Server error (${e.code}). Please try again later."
     }

@@ -140,8 +140,8 @@ fun SetupScreen(onDone: () -> Unit) {
             done = batteryOk && !restricted,
             title = "Turn off battery optimisation",
             body = when {
-                restricted -> "Battery is set to \"Restricted\" for UIC Recorder, so uploads can't run. Open App settings > Battery and choose \"Unrestricted\"."
-                !batteryOk -> "Tap Allow in the box that appears so uploads aren't stopped. If no box appears, choose \"All apps\", find UIC Recorder and select \"Don't optimise\"."
+                restricted -> "Battery is set to \"Restricted\" for UIC Dialer, so uploads can't run. Open App settings > Battery and choose \"Unrestricted\"."
+                !batteryOk -> "Tap Allow in the box that appears so uploads aren't stopped. If no box appears, choose \"All apps\", find UIC Dialer and select \"Don't optimise\"."
                 else -> "Battery optimisation is off."
             },
         ) {
@@ -163,7 +163,7 @@ fun SetupScreen(onDone: () -> Unit) {
             Step(
                 done = false,
                 title = "Google Phone can't be used",
-                body = "Your default Phone app is Google Phone. Its call recordings are stored privately and UIC Recorder can't read them. " +
+                body = "Your default Phone app is Google Phone. Its call recordings are stored privately and UIC Dialer can't read them. " +
                     "Switch the default Phone app to your phone maker's dialer (Settings > Apps > Default apps > Phone app) and turn on its auto-record.",
             )
         }
@@ -171,7 +171,7 @@ fun SetupScreen(onDone: () -> Unit) {
         Step(
             done = null,
             title = "Turn on automatic call recording",
-            body = "In your Phone app open Settings > Call recording and record all calls automatically. UIC Recorder only uploads what the dialer records.",
+            body = "In your Phone app open Settings > Call recording and record all calls automatically. UIC Dialer only uploads what the dialer records.",
         )
 
         val enabled = discovery.enabled
@@ -226,11 +226,11 @@ fun SetupScreen(onDone: () -> Unit) {
 }
 
 private fun autostartHint(maker: String) = when (maker) {
-    "xiaomi", "redmi", "poco" -> "Security > Autostart: turn on UIC Recorder. Also set Battery saver to \"No restrictions\"."
-    "oppo", "realme", "oneplus" -> "Allow UIC Recorder to auto-launch / run in background."
-    "vivo", "iqoo" -> "Allow background startup for UIC Recorder (i Manager > App manager)."
-    "samsung" -> "Battery: make sure UIC Recorder isn't in \"Sleeping apps\" or \"Deep sleeping apps\"."
-    else -> "Allow UIC Recorder to start automatically and run in the background."
+    "xiaomi", "redmi", "poco" -> "Security > Autostart: turn on UIC Dialer. Also set Battery saver to \"No restrictions\"."
+    "oppo", "realme", "oneplus" -> "Allow UIC Dialer to auto-launch / run in background."
+    "vivo", "iqoo" -> "Allow background startup for UIC Dialer (i Manager > App manager)."
+    "samsung" -> "Battery: make sure UIC Dialer isn't in \"Sleeping apps\" or \"Deep sleeping apps\"."
+    else -> "Allow UIC Dialer to start automatically and run in the background."
 }
 
 /** One checklist row. [done] null = informational (no tick). */

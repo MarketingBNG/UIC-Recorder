@@ -51,7 +51,7 @@ fun UpdateBanner(modifier: Modifier = Modifier, checkKey: Any = Unit) {
                 Button(enabled = !busy, onClick = {
                     error = null
                     if (!updater.canInstall()) {
-                        error = "Allow \"Install unknown apps\" for UIC Recorder, then tap Update again."
+                        error = "Allow \"Install unknown apps\" for UIC Dialer, then tap Update again."
                         runCatching { updater.openInstallPermissionSettings(context) }
                         return@Button
                     }
