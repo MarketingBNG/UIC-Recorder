@@ -245,6 +245,9 @@ export interface CrmStats {
   errors: number;
   queued: number;
   lastError: string | null;
+  /** Whole sync paused by an auth / Zoho outage error (retries with backoff). */
+  failing?: boolean;
+  globalError?: string | null;
 }
 export interface AuditEntry {
   id: string;

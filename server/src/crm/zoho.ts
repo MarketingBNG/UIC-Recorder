@@ -20,14 +20,39 @@ export interface ZohoOptions {
   now?: () => number;
 }
 
+/** A failed token refresh is remembered this long, so a bad refresh token isn't retried on every call. */
+export const REFRESH_FAIL_CACHE_MS = 5 * 60_000;
+/** Zoho error codes meaning our credentials / scopes are wrong (no single call can fix them). */
+const GLOBAL_CODES = new Set([
+  "OAUTH_SCOPE_MISMATCH",
+  "INVALID_TOKEN",
+  "AUTHENTICATION_FAILURE",
+  "invalid_code",
+  "invalid_client",
+  "invalid_client_secret",
+]);
+
 export class ZohoError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly code?: string,
+    /** Per-record error details from Zoho, e.g. { api_name: "id" } for an unknown record id. */
+    readonly details?: Record<string, unknown>,
+    /** Auth / config / outage error: affects every call, so the loop backs off instead of failing calls. */
+    readonly global = false,
   ) {
     super(message);
   }
+}
+
+/** True for errors no single call is to blame for: auth, scopes, rate limit, Zoho outage, network. */
+export function isGlobalError(err: unknown): boolean {
+  if (err instanceof ZohoError) {
+    return err.global || err.status === 401 || err.status === 429 || err.status >= 500 || GLOBAL_CODES.has(err.code ?? "");
+  }
+  // fetch() network failures (DNS, connection reset) are TypeErrors.
+  return err instanceof TypeError;
 }
 
 export type ZohoModule = "Leads" | "Contacts";
@@ -57,6 +82,7 @@ interface WriteResult {
 export class ZohoClient {
   private token: { value: string; expiresAt: number } | undefined;
   private refreshing: Promise<string> | undefined;
+  private refreshFailed: { until: number; err: ZohoError } | undefined;
   private readonly fetch: typeof fetch;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
@@ -70,10 +96,17 @@ export class ZohoClient {
   /** Cached access token; one refresh at a time. */
   async accessToken(): Promise<string> {
     if (this.token && this.token.expiresAt - REFRESH_MARGIN_MS > this.now()) return this.token.value;
+    if (this.refreshFailed && this.refreshFailed.until > this.now()) throw this.refreshFailed.err;
     this.refreshing ??= this.refresh().finally(() => {
       this.refreshing = undefined;
     });
     return this.refreshing;
+  }
+
+  private failRefresh(message: string, status: number, code?: string): ZohoError {
+    const err = new ZohoError(status, message, code, undefined, true);
+    this.refreshFailed = { until: this.now() + REFRESH_FAIL_CACHE_MS, err };
+    return err;
   }
 
   private async refresh(): Promise<string> {
@@ -83,18 +116,24 @@ export class ZohoClient {
       client_secret: this.o.clientSecret,
       grant_type: "refresh_token",
     });
-    const res = await this.withRetry(() =>
-      this.fetch(`${this.o.accountsUrl.replace(/\/$/, "")}/oauth/v2/token`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: q.toString(),
-      }),
-    );
+    let res: Response;
+    try {
+      res = await this.withRetry(() =>
+        this.fetch(`${this.o.accountsUrl.replace(/\/$/, "")}/oauth/v2/token`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: q.toString(),
+        }),
+      );
+    } catch (err) {
+      throw this.failRefresh(`Zoho token refresh failed: ${err instanceof Error ? err.message : "network error"}`, 0);
+    }
     const body = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error?: string };
     // Zoho answers 200 with { error: "invalid_code" } for a bad / revoked refresh token. Never log the token.
     if (!res.ok || !body.access_token) {
-      throw new ZohoError(res.status, `Zoho token refresh failed: ${body.error ?? `HTTP ${res.status}`}`, body.error);
+      throw this.failRefresh(`Zoho token refresh failed: ${body.error ?? `HTTP ${res.status}`}`, res.status, body.error);
     }
+    this.refreshFailed = undefined;
     this.token = { value: body.access_token, expiresAt: this.now() + (body.expires_in ?? 3600) * 1000 };
     return body.access_token;
   }
@@ -146,9 +185,12 @@ export class ZohoClient {
       const json = text ? (JSON.parse(text) as T & { code?: string; message?: string }) : null;
       if (!res.ok) {
         // Per-record errors come inside data[0] (e.g. INVALID_DATA for a deleted record id).
-        const top = json as { code?: string; message?: string; data?: { code?: string; message?: string }[] } | null;
-        const j = top?.code ? top : (top?.data?.[0] ?? top);
-        throw new ZohoError(res.status, `Zoho ${method} ${path.split("?")[0]}: ${j?.code ?? res.status} ${j?.message ?? ""}`.trim(), j?.code);
+        type Err = { code?: string; message?: string; details?: Record<string, unknown> };
+        const top = json as (Err & { data?: Err[] }) | null;
+        const j: Err | null = top?.code ? top : (top?.data?.[0] ?? top);
+        const msg = `Zoho ${method} ${path.split("?")[0]}: ${j?.code ?? res.status} ${j?.message ?? ""}`.trim();
+        // A second 401 (after a fresh token) means the credentials themselves are bad.
+        throw new ZohoError(res.status, msg, j?.code, j?.details, res.status === 401);
       }
       return json;
     }
@@ -188,7 +230,7 @@ export class ZohoClient {
 function writeId(r: { data: WriteResult[] } | null, what: string): string {
   const row = r?.data?.[0];
   if (!row || row.status !== "success" || !row.details?.id) {
-    throw new ZohoError(400, `Zoho ${what}: ${row?.code ?? "no result"} ${row?.message ?? ""}`.trim(), row?.code);
+    throw new ZohoError(400, `Zoho ${what}: ${row?.code ?? "no result"} ${row?.message ?? ""}`.trim(), row?.code, row?.details);
   }
   return row.details.id;
 }

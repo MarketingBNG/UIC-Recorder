@@ -60,7 +60,9 @@ If you turn on `ZOHO_CREATE_UNKNOWN_LEADS`, first add **UIC Dialer** to the Lead
 - Matching: Zoho phone search on the last 10 digits, Contacts first, then Leads; newest modified wins.
 - No match: shown as "No matching lead or contact" (retried by the 30-day backfill or the call's **Resync to CRM** button).
 - A re-transcribed or newly summarized call updates the same Call and Note (no duplicates).
-- Errors retry with backoff (2, 4, 8 … minutes, max 6 h, 8 tries). After that, use **Resync to CRM**.
+- Errors on one call retry with backoff (2, 4, 8 … minutes, max 6 h, 8 tries). After that, use **Resync to CRM**.
+- Auth / scope errors (bad or revoked refresh token, `OAUTH_SCOPE_MISMATCH`), Zoho 5xx / rate limits and network errors pause the whole sync instead (5, 10, 20, 40, then every 60 minutes) without using up any call's tries. With `CLIQ_WEBHOOK_URL` set, one Cliq alert goes out ("Zoho CRM sync failing …") and a "Resolved" message when it works again. Health shows "Paused".
+- Each call is leased to one server while it syncs, so two containers during a rolling deploy never send the same call twice.
 - Owner: the Zoho user with the rep's email; otherwise the Self Client user.
 
 ## Revoking

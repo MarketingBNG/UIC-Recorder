@@ -173,6 +173,8 @@ model Call {
   // Set by an admin resync / backfill: sync even if outside the loop's recent window.
   crmQueuedAt      DateTime? @map("crm_queued_at")
   crmNextAttemptAt DateTime? @map("crm_next_attempt_at")
+  // Lease held while one server syncs the call (see CrmSync.claim).
+  crmLockedUntil   DateTime? @map("crm_locked_until")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 

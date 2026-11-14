@@ -16,6 +16,8 @@ export interface Deps {
   oidc?: import("./auth/oidc.js").DashboardOidc | undefined;
   /** Zoho CRM sync; absent when ZOHO_REFRESH_TOKEN is not configured. */
   crm?: import("./crm/sync.js").CrmSync | undefined;
+  /** The CRM loop's global health (auth / outage backoff), for the dashboard. */
+  crmLoop?: import("./crm/sync.js").CrmLoop | undefined;
 }
 
 declare module "fastify" {

@@ -239,7 +239,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       error: call.crmSyncError,
       attempts: call.crmAttempts,
     };
-    const { crmStatus: _a, crmCallId: _b, crmNoteId: _c, crmRecordModule: _d, crmRecordId: _e, crmSyncedAt: _f, crmSyncError: _g, crmAttempts: _h, crmQueuedAt: _i, crmNextAttemptAt: _j, ...rest } = call;
+    const { crmStatus: _a, crmCallId: _b, crmNoteId: _c, crmRecordModule: _d, crmRecordId: _e, crmSyncedAt: _f, crmSyncError: _g, crmAttempts: _h, crmQueuedAt: _i, crmNextAttemptAt: _j, crmLockedUntil: _k, ...rest } = call;
     return { ...rest, transcript, crm, fileSize: call.fileSize?.toString() ?? null };
   });
 
@@ -386,7 +386,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
 
   // ---- Zoho CRM sync ----------------------------------------------------
 
-  app.get("/api/crm", managers, async () => crmStats(deps.db, !!deps.crm));
+  app.get("/api/crm", managers, async () => crmStats(deps.db, !!deps.crm, deps.crmLoop?.health));
 
   /** Re-sends one call to Zoho now (updates its Call + Note, or links it if it was "no match"). */
   app.post("/api/admin/crm/resync/:id", admins, async (req) => {
@@ -395,10 +395,11 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const call = await deps.db.call.findUnique({ where: { id }, select: { status: true } });
     if (!call) throw new HttpError(404, "Not found");
     if (call.status !== "TRANSCRIBED") throw new HttpError(409, "Only transcribed calls sync to Zoho CRM");
-    const status = await deps.crm.resync(id);
-    await audit(req, "CRM_SYNC", id, { resync: status });
+    const r = await deps.crm.resync(id);
+    await audit(req, "CRM_SYNC", id, { resync: r.status });
+    if (r.status === "BUSY") throw new HttpError(409, "This call is being synced right now; try again in a minute");
     const after = await deps.db.call.findUnique({ where: { id }, select: { crmSyncError: true } });
-    return { status, error: after?.crmSyncError ?? null };
+    return { status: r.status, error: r.error ?? after?.crmSyncError ?? null };
   });
 
   /** Queues the last 30 days of transcribed calls that aren't in Zoho yet; the sync loop works through them. */

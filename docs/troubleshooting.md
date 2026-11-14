@@ -2,6 +2,13 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## `npm test` failed in global setup: `EPERM rm server/.pgtest` (Zoho CRM sync review, local dev)
+- **Cause:** an orphaned `postgres.exe` io_worker from an earlier test run (its postmaster had exited) still held the test data dir.
+- **Fix:** found it with `Get-CimInstance Win32_Process -Filter "Name='postgres.exe'"` (orphan: parent PID gone) and stopped only that PID; the dev DB on `.pgdata` was left running.
+
+## Bash heredoc with TypeScript template literals failed: "unexpected EOF while looking for matching quote" (Zoho CRM sync review, local dev)
+- **Fix:** same as before: write the text to a scratch file with the Write tool, then append it with Python.
+
 ## Zoho CRM test counted the OAuth token POST as a CRM write (Zoho CRM sync, local dev)
 - **Cause:** the fake fetch records every request, including `POST /oauth/v2/token`.
 - **Fix:** the tests filter out `oauth` URLs when counting Call / Note writes.

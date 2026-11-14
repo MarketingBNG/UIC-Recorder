@@ -414,6 +414,9 @@ function CrmPanel({ isAdmin }: { isAdmin: boolean }) {
               ? `${d.synced} synced · ${d.noMatch} no match · ${d.errors} errors${d.queued ? ` · ${d.queued} queued` : ""}`
               : "Off: set ZOHO_REFRESH_TOKEN (and client ID / secret) on the server. See docs/zoho-crm-setup.md."}
           </p>
+          {d.enabled && d.failing && (
+            <p className="text-sm text-red-600 dark:text-red-400">Paused: {d.globalError ?? "Zoho is not responding"}. Retrying automatically.</p>
+          )}
           {d.enabled && d.errors > 0 && d.lastError && <p className="text-sm text-red-600 dark:text-red-400">Last error: {d.lastError}</p>}
         </div>
         {isAdmin && (
