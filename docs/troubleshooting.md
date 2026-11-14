@@ -183,3 +183,11 @@ Newest first. One line each for the problem, cause and fix.
 
 ## `npm audit` flagged `glob`
 - **Fix:** `overrides` pins `glob` to 14.0.3 in `server/package.json`.
+
+## Server tests fail: "pre-existing shared memory block is still in use"
+- **Cause:** an orphaned `postgres.exe` child from an earlier test run (parent is not the dev DB) still holds shared memory.
+- **Fix:** find `postgres.exe` processes whose parent isn't the dev DB postmaster and stop only that one, then rerun `npm test`.
+
+## CRM tests passed or failed at random
+- **Cause:** the shared test DB holds over 1,000 calls, so `candidates(1000)` sometimes missed the test's own call.
+- **Fix:** tests use `candidates(1_000_000)`.
