@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type CallStatus, type CompressionStats, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
+import { api, type CallStatus, type CompressionStats, type CrmStats, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
 import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
@@ -71,6 +71,7 @@ export function HealthPage() {
       {isAdmin && <SummarizeBackfill />}
       {isAdmin && stats.data?.compression && <CompressBackfill c={stats.data.compression} />}
       {isAdmin && <TestAlert enabled={stats.data?.alertsEnabled} />}
+      <CrmPanel isAdmin={isAdmin} />
 
       {devices.isPending ? (
         <Spinner label="Loading devices" />
@@ -385,6 +386,44 @@ function CompressBackfill({ c }: { c: CompressionStats }) {
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} recording${run.data.queued === 1 ? "" : "s"} for compression.` : "Nothing to queue.")}
+      </p>
+      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
+    </section>
+  );
+}
+
+/** Zoho CRM sync counts; admins can queue the last 30 days. */
+function CrmPanel({ isAdmin }: { isAdmin: boolean }) {
+  const qc = useQueryClient();
+  const crm = useQuery({ queryKey: ["crm"], queryFn: () => api<CrmStats>("/api/crm") });
+  const run = useMutation({
+    mutationFn: () => api<{ queued: number }>("/api/admin/crm/backfill", { method: "POST", body: {} }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["crm"] }),
+  });
+  const d = crm.data;
+  if (!d) return null;
+  return (
+    <section aria-labelledby="crm-h" className="card mb-4 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 id="crm-h" className="font-semibold">
+            Zoho CRM sync
+          </h2>
+          <p className="text-sm text-slate-500">
+            {d.enabled
+              ? `${d.synced} synced · ${d.noMatch} no match · ${d.errors} errors${d.queued ? ` · ${d.queued} queued` : ""}`
+              : "Off: set ZOHO_REFRESH_TOKEN (and client ID / secret) on the server. See docs/zoho-crm-setup.md."}
+          </p>
+          {d.enabled && d.errors > 0 && d.lastError && <p className="text-sm text-red-600 dark:text-red-400">Last error: {d.lastError}</p>}
+        </div>
+        {isAdmin && (
+          <button type="button" className="btn-outline" disabled={run.isPending || !d.enabled} onClick={() => run.mutate()}>
+            {run.isPending ? "Queuing…" : "Sync last 30 days"}
+          </button>
+        )}
+      </div>
+      <p className="mt-2 text-sm" role="status" aria-live="polite">
+        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} call${run.data.queued === 1 ? "" : "s"}; they sync over the next minutes.` : "Nothing to queue.")}
       </p>
       {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
     </section>

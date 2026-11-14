@@ -188,7 +188,24 @@ data class CallDetail(
     val translationPending: Boolean = false,
     /** Set when the server's retention setting deleted the audio (transcript kept). */
     val audioDeletedAt: String? = null,
+    /** Zoho CRM sync state; absent on older servers. */
+    val crm: CallCrm? = null,
 )
+
+@Serializable
+data class CallCrm(
+    val enabled: Boolean = false,
+    val status: String? = null,
+    val module: String? = null,
+)
+
+/** One-line Zoho CRM state for the call detail, or null when sync is off. */
+fun CallCrm.label(): String? = if (!enabled) null else when (status) {
+    "SYNCED" -> if (module == "Contacts") "Synced to contact" else "Synced to lead"
+    "NO_MATCH" -> "No matching lead or contact"
+    "ERROR" -> "Sync failed"
+    else -> "Waiting to sync"
+}
 
 @Serializable data class CallCount(val calls: Int = 0)
 

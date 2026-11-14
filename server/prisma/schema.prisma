@@ -63,6 +63,8 @@ enum AuditAction {
   RETENTION_DELETE
   // Milestone 5: CSV export of the call list.
   EXPORT
+  // Zoho CRM: admin resync / backfill.
+  CRM_SYNC
 }
 
 model User {
@@ -159,6 +161,18 @@ model Call {
   bytesSaved     BigInt?       @map("bytes_saved")
   // Set when the retention job deleted the audio file (transcript kept).
   audioDeletedAt DateTime?     @map("audio_deleted_at")
+  // Zoho CRM sync (src/crm/sync.ts). crmStatus: SYNCED | NO_MATCH | ERROR | null (not tried yet).
+  crmStatus        String?   @map("crm_status")
+  crmCallId        String?   @map("crm_call_id")
+  crmNoteId        String?   @map("crm_note_id")
+  crmRecordModule  String?   @map("crm_record_module")
+  crmRecordId      String?   @map("crm_record_id")
+  crmSyncedAt      DateTime? @map("crm_synced_at")
+  crmSyncError     String?   @map("crm_sync_error")
+  crmAttempts      Int       @default(0) @map("crm_attempts")
+  // Set by an admin resync / backfill: sync even if outside the loop's recent window.
+  crmQueuedAt      DateTime? @map("crm_queued_at")
+  crmNextAttemptAt DateTime? @map("crm_next_attempt_at")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -173,6 +187,7 @@ model Call {
   @@unique([userId, originalSha256])
   @@index([userId, startedAt(sort: Desc)])
   @@index([startedAt(sort: Desc)])
+  @@index([crmStatus])
   @@index([phoneE164(ops: raw("gin_trgm_ops"))], type: Gin, map: "calls_phone_e164_trgm_idx")
   @@map("calls")
 }

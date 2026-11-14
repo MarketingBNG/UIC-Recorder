@@ -121,6 +121,7 @@ The API checks every 5 minutes and posts to a Zoho Cliq channel when something b
 1. In Zoho Cliq, create a webhook token (**Bots & Tools → Webhook Tokens**). The URL is `https://cliq.zoho.in/api/v2/channelsbyname/<channel>/message?zapikey=<token>` (use your Cliq domain). Treat it as a secret.
 2. On `uic-api`, set `CLIQ_WEBHOOK_URL` and redeploy. Empty means alerts are off.
 3. Health page → **Send test alert** (admin) to check the channel gets messages.
+4. Zoho CRM sync (optional): see [zoho-crm-setup.md](zoho-crm-setup.md) for the `ZOHO_*` variables on `uic-api`.
 
 ## Privacy settings (Milestone 3)
 All off by default; nothing to set to keep today's behaviour. See `docs/privacy.md`.

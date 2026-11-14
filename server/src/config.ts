@@ -37,6 +37,20 @@ const schema = z.object({
   // Optional Zoho Cliq channel incoming-webhook URL (includes its zapikey: a secret). Empty = alerts off.
   CLIQ_WEBHOOK_URL: z.url().optional().or(z.literal("").transform(() => undefined)),
 
+  // Zoho CRM sync (docs/zoho-crm-setup.md). Off while ZOHO_REFRESH_TOKEN is empty. Secrets: never log.
+  ZOHO_CLIENT_ID: z.string().default(""),
+  ZOHO_CLIENT_SECRET: z.string().default(""),
+  ZOHO_REFRESH_TOKEN: z.string().default(""),
+  ZOHO_ACCOUNTS_URL: z.url().default("https://accounts.zoho.in"),
+  ZOHO_API_URL: z.url().default("https://www.zohoapis.in"),
+  // Zoho CRM web UI, for "open in Zoho" links on the dashboard.
+  ZOHO_CRM_WEB_URL: z.url().default("https://crm.zoho.in"),
+  // Unknown numbers become a new Lead (Lead Source "UIC Dialer") instead of "no match".
+  ZOHO_CREATE_UNKNOWN_LEADS: z
+    .enum(["true", "false", "1", "0", ""])
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
+
   DEFAULT_PHONE_REGION: z.string().length(2).default("IN"),
 
   // Queue an English translation job after every transcript (worker needs ANTHROPIC_API_KEY to run them).

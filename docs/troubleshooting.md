@@ -2,8 +2,17 @@
 
 Newest first. One line each for the problem, cause and fix.
 
+## Zoho CRM test counted the OAuth token POST as a CRM write (Zoho CRM sync, local dev)
+- **Cause:** the fake fetch records every request, including `POST /oauth/v2/token`.
+- **Fix:** the tests filter out `oauth` URLs when counting Call / Note writes.
+
+## Zoho "record deleted" update was not recognised (Zoho CRM sync, local dev)
+- **Cause:** Zoho puts per-record errors such as `INVALID_DATA` inside `data[0]`, not at the top level.
+- **Fix:** `ZohoClient.request` reads the code from `data[0]` when the top level has none, so a deleted Call is recreated.
+
 ## Edit script left a raw BOM / real line breaks in TypeScript strings (M5 review fixes, local dev)
-- **Cause:** the CSV code had a literal U+FEFF character, so a text match on the escaped form failed; a heredoc turned `
+- **Cause:** the CSV code had a literal U+FEFF character, so a text match on the escaped form failed; a heredoc turned `
+
 ` escapes into real line breaks.
 - **Fix:** the BOM is now a named `"﻿"` constant in `src/calls/export.ts`; the broken line was rewritten with the escapes built explicitly.
 

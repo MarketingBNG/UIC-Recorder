@@ -14,6 +14,8 @@ export interface Deps {
   verifyGoogle: GoogleVerifier;
   /** Dashboard OIDC; absent when GOOGLE_WEB_CLIENT_SECRET is not configured. */
   oidc?: import("./auth/oidc.js").DashboardOidc | undefined;
+  /** Zoho CRM sync; absent when ZOHO_REFRESH_TOKEN is not configured. */
+  crm?: import("./crm/sync.js").CrmSync | undefined;
 }
 
 declare module "fastify" {

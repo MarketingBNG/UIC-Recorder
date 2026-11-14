@@ -71,6 +71,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.usaindiacfo.uicrecorder.AppContainer
 import com.usaindiacfo.uicrecorder.appContainer
 import kotlinx.coroutines.launch
+import com.usaindiacfo.uicrecorder.data.api.label
 import com.usaindiacfo.uicrecorder.data.api.CallDetail
 import com.usaindiacfo.uicrecorder.data.api.CallStatus
 import com.usaindiacfo.uicrecorder.player.CallPlayer
@@ -190,6 +191,7 @@ private fun Meta(call: CallDetail) {
         if (!call.contactName.isNullOrBlank() && phone != null) MetaLine("Number", phone)
         MetaLine("When", formatWhen(call.startedAt))
         call.durationS?.let { MetaLine("Duration", formatDuration(it)) }
+        call.crm?.label()?.let { MetaLine("Zoho CRM", it) }
         MetaLine("Person", call.user.name ?: call.user.email)
         call.transcript?.language?.let { MetaLine("Language", it) }
     }

@@ -12,9 +12,10 @@ import { cliqSender } from "../alerts/cliq.js";
 import { throughput } from "../alerts/metrics.js";
 import { CostSettings, getCostSettings, saveCostSettings, translationUsage } from "../translation/cost.js";
 import { MAX_CLIENT_NUMBERS, MIN_KEY_DIGITS, importClientNumbers, numberKey, parseClientCsv } from "../privacy/clientNumbers.js";
+import { crmRecordUrl, crmStats } from "../crm/sync.js";
 import { PrivacySettings, getPrivacySettings, savePrivacySettings } from "../privacy/settings.js";
 
-const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE", "EXPORT"] as const;
+const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE", "EXPORT", "CRM_SYNC"] as const;
 const AuditQuery = z.object({
   action: z.enum(AUDIT_ACTIONS).optional(),
   userId: z.uuid().optional(),
@@ -228,7 +229,18 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const transcript = call.transcript
       ? { ...call.transcript, translationPending: pending("translate"), summaryPending: pending("summarize") }
       : null;
-    return { ...call, transcript, fileSize: call.fileSize?.toString() ?? null };
+    const crm = {
+      enabled: !!deps.crm,
+      status: call.crmStatus,
+      module: call.crmRecordModule,
+      recordId: call.crmRecordId,
+      recordUrl: call.crmRecordModule && call.crmRecordId ? crmRecordUrl(deps.config.ZOHO_CRM_WEB_URL, call.crmRecordModule, call.crmRecordId) : null,
+      syncedAt: call.crmSyncedAt,
+      error: call.crmSyncError,
+      attempts: call.crmAttempts,
+    };
+    const { crmStatus: _a, crmCallId: _b, crmNoteId: _c, crmRecordModule: _d, crmRecordId: _e, crmSyncedAt: _f, crmSyncError: _g, crmAttempts: _h, crmQueuedAt: _i, crmNextAttemptAt: _j, ...rest } = call;
+    return { ...rest, transcript, crm, fileSize: call.fileSize?.toString() ?? null };
   });
 
   /** Audio playback with HTTP Range support (seeking in the browser player). `?download=1` saves the file (audited). */
@@ -370,6 +382,31 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const ok = await cliqSender(url, (m) => req.log.warn(m))(`Test alert from UIC Recorder, sent by ${by.name ?? by.email}.`);
     if (!ok) throw new HttpError(502, "Zoho Cliq did not accept the message; check the webhook URL");
     return { sent: true };
+  });
+
+  // ---- Zoho CRM sync ----------------------------------------------------
+
+  app.get("/api/crm", managers, async () => crmStats(deps.db, !!deps.crm));
+
+  /** Re-sends one call to Zoho now (updates its Call + Note, or links it if it was "no match"). */
+  app.post("/api/admin/crm/resync/:id", admins, async (req) => {
+    if (!deps.crm) throw new HttpError(409, "Zoho CRM sync is off: ZOHO_REFRESH_TOKEN is not set on the server");
+    const id = idParam(req);
+    const call = await deps.db.call.findUnique({ where: { id }, select: { status: true } });
+    if (!call) throw new HttpError(404, "Not found");
+    if (call.status !== "TRANSCRIBED") throw new HttpError(409, "Only transcribed calls sync to Zoho CRM");
+    const status = await deps.crm.resync(id);
+    await audit(req, "CRM_SYNC", id, { resync: status });
+    const after = await deps.db.call.findUnique({ where: { id }, select: { crmSyncError: true } });
+    return { status, error: after?.crmSyncError ?? null };
+  });
+
+  /** Queues the last 30 days of transcribed calls that aren't in Zoho yet; the sync loop works through them. */
+  app.post("/api/admin/crm/backfill", admins, async (req) => {
+    if (!deps.crm) throw new HttpError(409, "Zoho CRM sync is off: ZOHO_REFRESH_TOKEN is not set on the server");
+    const queued = await deps.crm.queueBackfill();
+    await audit(req, "CRM_SYNC", undefined, { backfillDays: 30, queued });
+    return { queued };
   });
 
   app.get("/api/translation/usage", managers, async () => translationUsage(deps.db));

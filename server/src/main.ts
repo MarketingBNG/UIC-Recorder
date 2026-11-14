@@ -9,6 +9,8 @@ import { loadConfig } from "./config.js";
 import { createDb } from "./db.js";
 import { LocalStorage } from "./storage/local.js";
 import { startRetentionLoop } from "./privacy/retention.js";
+import { crmFromConfig, startCrmLoop } from "./crm/sync.js";
+import { ZohoClient } from "./crm/zoho.js";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 const config = loadConfig();
@@ -20,6 +22,20 @@ const oidc = config.GOOGLE_WEB_CLIENT_SECRET
   ? await DashboardOidc.create(config.GOOGLE_WEB_CLIENT_ID, config.GOOGLE_WEB_CLIENT_SECRET, config.PUBLIC_URL)
   : undefined;
 
+const crm = config.ZOHO_REFRESH_TOKEN
+  ? crmFromConfig(
+      db,
+      config,
+      new ZohoClient({
+        clientId: config.ZOHO_CLIENT_ID,
+        clientSecret: config.ZOHO_CLIENT_SECRET,
+        refreshToken: config.ZOHO_REFRESH_TOKEN,
+        accountsUrl: config.ZOHO_ACCOUNTS_URL,
+        apiUrl: config.ZOHO_API_URL,
+      }),
+    )
+  : undefined;
+
 const app = await buildApp(
   {
     config,
@@ -28,6 +44,7 @@ const app = await buildApp(
     tokens: new TokenService(db, config.JWT_SECRET, config.SESSION_SECRET),
     verifyGoogle: createGoogleVerifier(config.GOOGLE_WEB_CLIENT_ID),
     oidc,
+    crm,
   },
   {
     logger: {
@@ -45,6 +62,11 @@ const stopAlerts = config.CLIQ_WEBHOOK_URL
       app.log.error({ err }, "alert checks failed"),
     )
   : (app.log.warn("CLIQ_WEBHOOK_URL not set: alerts disabled"), () => {});
+
+// Zoho CRM sync every minute (single instance); off when ZOHO_REFRESH_TOKEN is empty.
+const stopCrm = crm
+  ? startCrmLoop(crm, (err) => app.log.error({ err: err instanceof Error ? err.message : err }, "zoho crm sync failed"))
+  : (app.log.info("ZOHO_REFRESH_TOKEN not set: Zoho CRM sync disabled"), () => {});
 
 // Daily audio retention; a no-op until an admin sets retentionMonths (default: keep forever).
 const stopRetention = startRetentionLoop(
@@ -67,6 +89,7 @@ partialTimer.unref();
 const shutdown = async () => {
   stopAlerts();
   stopRetention();
+  stopCrm();
   clearInterval(partialTimer);
   await app.close();
   await db.$disconnect();

@@ -255,6 +255,7 @@ internal val AUDIT_LABELS = linkedMapOf(
     "CLIENT_LIST_CHANGE" to "Client list changed",
     "RETENTION_DELETE" to "Retention deleted audio",
     "EXPORT" to "Exported calls (CSV)",
+    "CRM_SYNC" to "Zoho CRM sync",
 )
 
 internal fun auditLabel(action: String) = AUDIT_LABELS[action] ?: action

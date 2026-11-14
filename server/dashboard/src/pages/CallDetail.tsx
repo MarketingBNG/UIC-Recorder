@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, ApiError, isManager, type CallDetail, type SpeakerRole } from "../api";
+import { api, ApiError, isManager, type CallCrm, type CallDetail, type SpeakerRole } from "../api";
 import { useMe } from "../App";
 import { formatBytes, formatDuration, formatWhen, parseSegments, personName } from "../format";
 import { ConfirmDialog, DirectionTag, ErrorBox, Spinner, StatusBadge } from "../ui";
@@ -140,6 +140,7 @@ export function CallDetailPage() {
               </>
             )}
           </dl>
+          {c.crm?.enabled && <CrmStatus callId={c.id} crm={c.crm} isAdmin={me.role === "ADMIN"} transcribed={c.status === "TRANSCRIBED"} />}
           {me.role === "ADMIN" && (
             <button type="button" className="btn-outline mt-4 w-full border-red-300 text-red-700 dark:border-red-900 dark:text-red-300" onClick={() => setConfirmDelete(true)}>
               Delete call
@@ -372,6 +373,45 @@ function BackLink() {
           ← All calls
         </Link>
       )}
+    </div>
+  );
+}
+
+const CRM_LABEL = { SYNCED: "Synced", NO_MATCH: "No matching lead or contact", ERROR: "Sync failed" } as const;
+
+/** Zoho CRM link state; admins can resync. */
+function CrmStatus({ callId, crm, isAdmin, transcribed }: { callId: string; crm: CallCrm; isAdmin: boolean; transcribed: boolean }) {
+  const qc = useQueryClient();
+  const run = useMutation({
+    mutationFn: () => api<{ status: string; error: string | null }>(`/api/admin/crm/resync/${callId}`, { method: "POST", body: {} }),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["call", callId] }),
+  });
+  return (
+    <div className="mt-4 border-t border-slate-200 pt-3 text-sm dark:border-slate-800">
+      <p className="font-medium">Zoho CRM</p>
+      <p className="text-slate-600 dark:text-slate-300">
+        {crm.status ? CRM_LABEL[crm.status] : transcribed ? "Waiting to sync" : "Syncs after transcription"}
+        {crm.syncedAt && crm.status !== "ERROR" && ` · ${formatWhen(crm.syncedAt)}`}
+      </p>
+      {crm.module && crm.recordId && (
+        <p>
+          {crm.module === "Contacts" ? "Contact" : "Lead"}{" "}
+          {crm.recordUrl ? (
+            <a href={crm.recordUrl} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline dark:text-brand-100">
+              open in Zoho CRM
+            </a>
+          ) : (
+            crm.recordId
+          )}
+        </p>
+      )}
+      {crm.status === "ERROR" && crm.error && <p className="break-words text-red-600 dark:text-red-400">{crm.error}</p>}
+      {isAdmin && transcribed && (
+        <button type="button" className="btn-outline mt-2 w-full" disabled={run.isPending} onClick={() => run.mutate()}>
+          {run.isPending ? "Syncing…" : "Resync to CRM"}
+        </button>
+      )}
+      {run.isError && <p className="mt-1 text-red-600 dark:text-red-400">{run.error.message}</p>}
     </div>
   );
 }

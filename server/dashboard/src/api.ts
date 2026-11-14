@@ -35,6 +35,7 @@ export interface CallDetail extends Omit<CallItem, "transcript"> {
   filePath: string | null;
   /** Set when the retention setting deleted the audio (transcript kept). */
   audioDeletedAt?: string | null;
+  crm?: CallCrm;
   mimeType: string | null;
   fileSize: string | null;
   transcript: {
@@ -224,7 +225,27 @@ export type AuditAction =
   | "SETTINGS_CHANGE"
   | "CLIENT_LIST_CHANGE"
   | "RETENTION_DELETE"
-  | "EXPORT";
+  | "EXPORT"
+  | "CRM_SYNC";
+/** Zoho CRM sync state of one call (absent on older servers). */
+export interface CallCrm {
+  enabled: boolean;
+  status: "SYNCED" | "NO_MATCH" | "ERROR" | null;
+  module: string | null;
+  recordId: string | null;
+  recordUrl: string | null;
+  syncedAt: string | null;
+  error: string | null;
+  attempts: number;
+}
+export interface CrmStats {
+  enabled: boolean;
+  synced: number;
+  noMatch: number;
+  errors: number;
+  queued: number;
+  lastError: string | null;
+}
 export interface AuditEntry {
   id: string;
   action: AuditAction | string;

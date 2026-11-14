@@ -16,6 +16,7 @@ export const AUDIT_LABELS: Record<AuditAction, string> = {
   CLIENT_LIST_CHANGE: "Client list changed",
   RETENTION_DELETE: "Retention deleted audio",
   EXPORT: "Exported calls (CSV)",
+  CRM_SYNC: "Zoho CRM sync",
 };
 
 /** One-line summary of the detail JSON (same wording as the Android Audit screen). */
