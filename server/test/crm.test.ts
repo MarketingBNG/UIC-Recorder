@@ -249,33 +249,33 @@ describe("CrmSync", () => {
     expect(row.crmStatus).toBe("ERROR");
     expect(row.crmAttempts).toBe(1);
     expect(row.crmNextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
-    expect(await sync.candidates(1000)).not.toContain(call.id);
+    expect(await sync.candidates(1_000_000)).not.toContain(call.id);
     await t.db.call.update({ where: { id: call.id }, data: { crmNextAttemptAt: new Date(Date.now() - 1000) } });
-    expect(await sync.candidates(1000)).toContain(call.id);
+    expect(await sync.candidates(1_000_000)).toContain(call.id);
     expect((await sync.syncCall(call.id)).status).toBe("SYNCED");
   });
 
   it("waits for open translate/summary jobs and for the summary when summaries are on", async () => {
     const call = await newCall();
     const job = await t.db.job.create({ data: { callId: call.id, kind: "translate", status: "QUEUED" } });
-    expect(await sync.candidates(1000)).not.toContain(call.id);
+    expect(await sync.candidates(1_000_000)).not.toContain(call.id);
     await t.db.job.update({ where: { id: job.id }, data: { status: "DONE" } });
-    expect(await sync.candidates(1000)).toContain(call.id);
+    expect(await sync.candidates(1_000_000)).toContain(call.id);
 
     const waiting = new CrmSync(t.db, client(f), { publicUrl: "https://x", summarizeEnabled: true, createUnknownLeads: false });
-    expect(await waiting.candidates(1000)).not.toContain(call.id);
+    expect(await waiting.candidates(1_000_000)).not.toContain(call.id);
     await t.db.transcript.update({ where: { callId: call.id }, data: { summary: "done" } });
-    expect(await waiting.candidates(1000)).toContain(call.id);
+    expect(await waiting.candidates(1_000_000)).toContain(call.id);
   });
 
   it("re-syncs when the transcript changes after a sync", async () => {
     f.contacts = [{ id: "c1" }];
     const call = await newCall();
     await sync.syncCall(call.id);
-    expect(await sync.candidates(1000)).not.toContain(call.id);
+    expect(await sync.candidates(1_000_000)).not.toContain(call.id);
     await new Promise((r) => setTimeout(r, 5));
     await t.db.transcript.update({ where: { callId: call.id }, data: { textEn: "re-transcribed" } });
-    expect(await sync.candidates(1000)).toContain(call.id);
+    expect(await sync.candidates(1_000_000)).toContain(call.id);
   });
 
   it("admin routes: stats, resync and backfill (audited)", async () => {
@@ -297,9 +297,9 @@ describe("CrmSync", () => {
     const call = await newCall();
     await t.db.transcript.update({ where: { callId: call.id }, data: { updatedAt: new Date(Date.now() - 10 * 86400_000) } });
     await t.db.call.update({ where: { id: call.id }, data: { startedAt: new Date(Date.now() - 10 * 86400_000) } });
-    expect(await sync.candidates(1000)).not.toContain(call.id);
+    expect(await sync.candidates(1_000_000)).not.toContain(call.id);
     expect(await sync.queueBackfill()).toBeGreaterThan(0);
-    expect(await sync.candidates(1000)).toContain(call.id);
+    expect(await sync.candidates(1_000_000)).toContain(call.id);
   });
 
   it("creates only one Lead when the Call fails after the Lead was created", async () => {
@@ -405,11 +405,11 @@ describe("CrmSync", () => {
       expect(new Set(mine).size).toBe(mine.length);
       expect(mine.length).toBe(6);
       const leased = x[0]!;
-      expect(await sync.candidates(1000)).not.toContain(leased);
+      expect(await sync.candidates(1_000_000)).not.toContain(leased);
       expect((await other.syncCall(leased)).status).toBe("BUSY");
       // An expired lease (crashed server) is claimable again.
       await t.db.call.update({ where: { id: leased }, data: { crmLockedUntil: new Date(Date.now() - 1000) } });
-      expect(await sync.candidates(1000)).toContain(leased);
+      expect(await sync.candidates(1_000_000)).toContain(leased);
     });
   });
 
