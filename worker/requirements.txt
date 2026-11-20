@@ -38,7 +38,7 @@ jiter==0.18.0
     # via anthropic
 opentelemetry-api==1.45.2
     # via anthropic
-pydantic==2.14.2
+pydantic==2.14.3
     # via anthropic
 pydantic-core==2.50.2
     # via pydantic
